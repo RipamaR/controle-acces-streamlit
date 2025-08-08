@@ -376,13 +376,32 @@ def main():
 
     # CSS pour prendre (vraiment) toute la largeur
     st.markdown(
-        """
-        <style>
-        .block-container {max-width: 1800px; padding-top: 1rem; padding-bottom: 1rem;}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    """
+    <style>
+    /* Étendre réellement la zone de contenu à toute la largeur */
+    .appview-container .main .block-container {
+        max-width: 100vw;       /* pleine largeur */
+        padding-left: 1rem;     /* petites marges internes */
+        padding-right: 1rem;
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+
+    /* Évite que des wrappers imposent une largeur plus petite */
+    html, body, .main, .block-container {
+        width: 100vw;
+        overflow-x: hidden;
+    }
+
+    /* Les iframes / dataframes respectent aussi la largeur */
+    iframe, .stDataFrame, .stMarkdown, .stPlotlyChart, .stAltairChart {
+        max-width: 100%;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
     init_state()
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
