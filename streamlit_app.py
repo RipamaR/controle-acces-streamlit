@@ -1,18 +1,15 @@
 # streamlit_app.py
 # -----------------------------------------------------------
 # Application Streamlit pour contrôle d'accès (RBAC, DAC, China-Wall)
-# Version 100% Streamlit (pas d'ipywidgets)
+# Version plein écran (grandes zones de graphes)
 # -----------------------------------------------------------
 
 import io
-import time
-import random
 import pandas as pd
 import networkx as nx
 import streamlit as st
 from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
-
 
 # =============== ÉTAT GLOBAL (Streamlit) ===================
 def init_state():
@@ -21,7 +18,6 @@ def init_state():
             columns=["Source", "Permission", "Target", "Role", "Heritage"]
         )
 
-    # RBAC (ensembles)
     for key, default in [
         ("roles_definis", set()),
         ("role_permissions", {}),   # {role: set((perm, obj))}
@@ -34,7 +30,6 @@ def init_state():
     ]:
         if key not in st.session_state:
             st.session_state[key] = default
-
 
 # =============== ALGORITHMES (Tarjan & co) =================
 def tarjan(V, adj):
@@ -78,7 +73,6 @@ def tarjan(V, adj):
 
     return scc, component_map
 
-
 def propagate_labels(components, adj, component_map):
     labels = {frozenset(comp): set(comp) for comp in components}
 
@@ -99,7 +93,6 @@ def propagate_labels(components, adj, component_map):
 
     return [labels[frozenset(comp)] for comp in components]
 
-
 def simplify_relations(labels):
     reduced = nx.DiGraph()
     label_map = {i: label_set for i, label_set in enumerate(labels)}
@@ -109,7 +102,6 @@ def simplify_relations(labels):
             if i != j and s1.issubset(s2):
                 reduced.add_edge(i, j)
 
-    # suppression des arêtes transitives
     transitive_edges = set()
     for i in range(len(labels)):
         for j in range(len(labels)):
@@ -122,13 +114,12 @@ def simplify_relations(labels):
 
     return [(label_map[u], label_map[v]) for u, v in reduced.edges()]
 
-
 # =============== CONSTRUCTION DU GRAPHE ====================
 def apply_permissions(df: pd.DataFrame):
     """
     Construit l'adjacence à partir des permissions :
-    - R : Target -> Source
-    - W : Source -> Target
+    - R : Target -> Source (lecture)
+    - W : Source -> Target (écriture)
     """
     adj = {}
 
@@ -150,12 +141,10 @@ def apply_permissions(df: pd.DataFrame):
             elif perm == "W":
                 add_edge(s, t)
 
-    # dédoublonnage
     for k in list(adj.keys()):
         adj[k] = list(sorted(set(adj[k])))
 
     return adj
-
 
 def display_table(components, labels):
     data = {
@@ -169,9 +158,13 @@ def display_table(components, labels):
     st.markdown("### Table des entités et étiquettes")
     st.dataframe(df, use_container_width=True)
 
-
+# ==== >>> VERSION PLEIN ÉCRAN ICI (hauteur/largeur augmentées) <<<
 def draw_combined_graph(components, adj, labels, simplified_edges):
-    net = Network(height="750px", width="100%", directed=True, notebook=False)
+    # Hauteur dynamique pour remplir la page (min 900px, max 1600px)
+    nb_nodes = sum(len(c) for c in components)
+    dynamic_height = max(900, min(1600, 350 + 40 * nb_nodes))
+
+    net = Network(height=f"{dynamic_height}px", width="100%", directed=True, notebook=False)
 
     # Noeuds (un par entité)
     added = set()
@@ -195,17 +188,15 @@ def draw_combined_graph(components, adj, labels, simplified_edges):
 
     # Sous-graphe des classes d'équivalence (boîtes) + relations réduites
     base_id = 10_000_000
-    boxes = []
     for i, (comp, label) in enumerate(zip(components, labels)):
         name = ", ".join(comp)
         combined = "{" + ", ".join(sorted(label | set(comp))) + "}"
         text = f"| {name}: {combined} |"
         nid = base_id + i
         net.add_node(nid, label=text, shape="box")
-        boxes.append((nid, comp, label))
 
     def find_index_by_set(target_set):
-        for i, (_, _, lbl) in enumerate(zip(components, components, labels)):
+        for i, lbl in enumerate(labels):
             if lbl == target_set:
                 return i
         return None
@@ -216,26 +207,17 @@ def draw_combined_graph(components, adj, labels, simplified_edges):
         if si is not None and di is not None:
             net.add_edge(base_id + si, base_id + di, arrows="to")
 
-    # Affichage dans Streamlit
-    html_str = net.generate_html()  # renvoie la page HTML complète
-    st_html(html_str, height=800, scrolling=True)
-
+    html_str = net.generate_html()
+    # Hauteur d’iframe = même hauteur que le canvas PyVis
+    st_html(html_str, height=dynamic_height + 60, scrolling=True)
 
 # =============== RBAC : propagation depuis Excel ===========
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    - Si plusieurs sujets partagent un même rôle, chacun hérite des permissions
-      (R/W) de ce rôle sur les mêmes objets.
-    - Les lignes héritées reçoivent Heritage='Role' (facultatif).
-    """
     df = df.copy()
-
     if "Role" not in df.columns:
         return df
 
-    # role -> set((perm, obj))
     role_perms = {}
-    # subject -> set(roles)
     subject_roles = {}
 
     for _, row in df.iterrows():
@@ -252,7 +234,6 @@ def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
     for subj, roles in subject_roles.items():
         for r in roles:
             for perm, obj in role_perms.get(r, set()):
-                # déjà présent ?
                 mask = (
                     (df["Source"] == subj)
                     & (df["Permission"] == perm)
@@ -268,16 +249,12 @@ def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-
 # =============== CHINA-WALL (vérif) ========================
 def violates_china_wall(labels):
-    # global + par entité (session_state)
     for comp in labels:
-        # global
         for interdit in st.session_state.interdictions_globales:
             if set(interdit).issubset(comp):
                 return True, f"Combinaison globale interdite: {interdit}"
-        # par entité
         for ent, combos in st.session_state.interdictions_entites.items():
             if ent in comp:
                 for interdit in combos:
@@ -285,59 +262,44 @@ def violates_china_wall(labels):
                         return True, f"Combinaison interdite pour {ent}: {interdit}"
     return False, ""
 
-
 # =============== VISUALISATION COMPLÈTE ====================
 def process_data_display(df: pd.DataFrame):
     if df is None or df.empty:
         st.info("Aucune donnée à afficher.")
         return
 
-    # 1) Appliquer RBAC (héritage) si nécessaire
     df_expanded = propagate_rbac_from_excel(df)
-
-    # 2) Construire l'adjacence
     adj = apply_permissions(df_expanded)
     V = sorted(set(adj.keys()) | {v for lst in adj.values() for v in lst})
 
-    # 3) SCC + labels
     scc, cmap = tarjan(V, adj)
     labels = propagate_labels(scc, adj, cmap)
 
-    # 4) Vérif China-Wall
     violated, msg = violates_china_wall(labels)
     if violated:
         st.error(f"⛔ CHINA-WALL: {msg}")
         return
 
-    # 5) Table + Graphes
     display_table(scc, labels)
     simplified_edges = simplify_relations(labels)
     draw_combined_graph(scc, adj, labels, simplified_edges)
 
-
 # =============== TERMINAL DE COMMANDES =====================
 def apply_prompt(df: pd.DataFrame, prompt: str):
-    """
-    Version simplifiée (mais compatible avec tes commandes).
-    Tu peux y recoller tes branches complètes si tu veux,
-    la logique Streamlit ne change pas.
-    """
     parts = prompt.strip().split()
     if not parts:
         return df, "❌ Empty command."
 
     cmd = parts[0]
     args = parts[1:]
-    msg = ""
 
-    # — ENTITÉS (modèle entité simple) —
     if cmd == "AddEnt":
         if len(args) != 1:
             return df, "❌ Usage: AddEnt E1"
         ent = args[0]
         if ((df["Source"] == ent) | (df["Target"] == ent)).any():
             return df, f"⚠️ Entity '{ent}' already exists."
-        df = pd.concat([df, pd.DataFrame([{"Source": ent, "Permission": None, "Target": None, "Role": None}])], ignore_index=True)
+        df = pd.concat([df, pd.DataFrame([{"Source": ent, "Permission": None, "Target": None, "Role": None}] )], ignore_index=True)
         return df, f"✅ Entity '{ent}' added."
 
     if cmd == "AddCh":
@@ -357,11 +319,10 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
         return df, f"🗑️ {removed} channel(s) removed between '{src}' and '{dst}'."
 
     if cmd == "Never":
-        # ex: Never {A,B}  ou  Never {A,B} for E1 E2
         if "for" in args:
             idx = args.index("for")
             etiquette = [e.strip("{} ,") for e in args[:idx]]
-            entites = [e.strip("{} ,") for e in args[idx + 1 :]]
+            entites = [e.strip("{} ,") for e in args[idx + 1:]]
             for ent in entites:
                 st.session_state.interdictions_entites.setdefault(ent, []).append(etiquette)
             return df, f"🚧 Forbidden combination {etiquette} for entities {entites}"
@@ -370,7 +331,6 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
             st.session_state.interdictions_globales.append(etiquette)
             return df, f"🚧 Globally forbidden combination: {etiquette}"
 
-    # — RBAC de base (AddRole, AddSub Role, GrantPermission) —
     if cmd == "AddRole":
         if len(args) != 1:
             return df, "❌ Usage: AddRole R1"
@@ -380,7 +340,6 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
         return df, f"✅ Role '{role}' added."
 
     if cmd == "AddSub":
-        # AddSub S1 [R1]
         if len(args) < 1:
             return df, "❌ Usage: AddSub S1 [R1]"
         subj = args[0]
@@ -394,32 +353,38 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
         return df, f"✅ Subject '{subj}' added" + (f" with role '{role}'" if role else "")
 
     if cmd == "GrantPermission":
-        # GrantPermission R1 R O1
         if len(args) != 3:
             return df, "❌ Usage: GrantPermission R1 R O1"
         role, perm, obj = args
         if role not in st.session_state.roles_definis:
             return df, f"❌ Role '{role}' is not defined."
         st.session_state.role_permissions.setdefault(role, set()).add((perm, obj))
-        # Propagation aux sujets ayant ce rôle
         for subj, roles in st.session_state.subject_roles.items():
             if role in roles:
                 df = pd.concat([df, pd.DataFrame([{"Source": subj, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"}])], ignore_index=True)
         return df, f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated."
 
     if cmd == "show":
-        # affichage dans la page
         process_data_display(df)
         return df, "🚀 Génération des graphes…"
 
     return df, "❌ Unknown command."
 
-
 # =============== UI STREAMLIT ==============================
 def main():
     st.set_page_config(page_title="Contrôle d'accès – Streamlit", layout="wide")
-    init_state()
 
+    # CSS pour prendre (vraiment) toute la largeur
+    st.markdown(
+        """
+        <style>
+        .block-container {max-width: 1800px; padding-top: 1rem; padding-bottom: 1rem;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    init_state()
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
 
     tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal de commandes"])
@@ -429,12 +394,12 @@ def main():
         up = st.file_uploader("Importer un fichier Excel (colonnes: Source, Permission, Target, Role, Heritage optionnelle)", type=["xlsx"])
         if up:
             try:
+                # openpyxl est requis côté déploiement (ajouté dans requirements.txt)
                 df = pd.read_excel(io.BytesIO(up.read()))
                 missing = {"Source", "Permission", "Target"} - set(df.columns)
                 if missing:
                     st.error(f"Colonnes manquantes: {missing}")
                 else:
-                    # garder en session
                     if "Role" not in df.columns:
                         df["Role"] = None
                     if "Heritage" not in df.columns:
@@ -458,8 +423,7 @@ def main():
             st.session_state.history.append(f"C:\\> {cmd}\n{message}")
             st.experimental_rerun()
 
-        st.text_area("Historique", "\n\n".join(st.session_state.history), height=300)
-
+        st.text_area("Historique", "\n\n".join(st.session_state.history), height=320)
 
 if __name__ == "__main__":
     main()
