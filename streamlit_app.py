@@ -859,61 +859,14 @@ with tabs[0]:
     up = st.file_uploader("Choisir un fichier Excel", type=["xlsx"])
     if up:
         try:
-            df = pd.read_excel(io.BytesIO(up.read()))
-            # normalisation colonnes
-            for col in ['Source', 'Permission', 'Target']:
-                if col not in df.columns:
-                    st.error(f"Colonne manquante: {col}")
-                    st.stop()
-            if 'Role' not in df.columns:
-                df['Role'] = None
+    df = pd.read_excel(io.BytesIO(up.read()), engine="openpyxl")
+    # Forcer les colonnes manquantes
+    for col in ["Source", "Permission", "Target", "Role", "Heritage"]:
+        if col not in df.columns:
+            df[col] = None
+except Exception as e:
+    st.error(f"Erreur de lecture du fichier: {e}")
 
-            # Stocke + (optionnel) propagation RBAC matérielle (héritage depuis Excel)
-            # On copie pour éviter erreurs d'ajustement colonnes
-            global_df = df.copy()
-
-            # Propagation RBAC: rôle -> permissions vers sujets ayant ce rôle
-            subject_roles = {}
-            role_permissions = {}
-
-            for _, row in global_df.iterrows():
-                source = row.get('Source')
-                permission = row.get('Permission')
-                target = row.get('Target')
-                role = row.get('Role')
-
-                if pd.notna(source) and pd.notna(role):
-                    subject_roles.setdefault(source, set()).add(str(role).strip())
-                if pd.notna(role) and pd.notna(permission) and pd.notna(target):
-                    role_permissions.setdefault(str(role).strip(), set()).add((str(permission).strip(), str(target).strip()))
-
-            additions = []
-            for subject, roles in subject_roles.items():
-                for role in roles:
-                    for perm, obj in role_permissions.get(role, set()):
-                        condition = (
-                            (global_df['Source'] == subject) &
-                            (global_df['Permission'] == perm) &
-                            (global_df['Target'] == obj)
-                        )
-                        if not condition.any():
-                            additions.append([subject, perm, obj, role])
-
-            if additions:
-                add_df = pd.DataFrame(additions, columns=global_df.columns)
-                global_df = pd.concat([global_df, add_df], ignore_index=True)
-
-            st.session_state.global_data = global_df
-            st.success(f"✅ Fichier chargé. Lignes totales: {len(global_df)}")
-
-            with st.expander("Voir les données chargées"):
-                st.dataframe(global_df, use_container_width=True)
-
-            st.markdown("---")
-            process_data(st.session_state.global_data)
-
-        except Exception as e:
-            st.error(f"Erreur de lecture du fichier: {e} — ajoute `openpyxl` dans requirements.txt si nécessaire.")
 
 # -------- Onglet Terminal --------
 with tabs[1]:
