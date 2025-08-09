@@ -200,67 +200,6 @@ def display_role_table_streamlit(df: pd.DataFrame):
     st.markdown("### Table des rôles et permissions")
     st.dataframe(df_role, use_container_width=True)
 
-def draw_entities_graph(adj, components, labels):
-    """Graphe des entités (nœuds = entités, arêtes = flux, TR si DAG)."""
-    net = Network(notebook=False, height='950px', width='100%', directed=True, cdn_resources='in_line')
-
-    # Ajout des nœuds (annotés avec leurs labels propagés)
-    added = set()
-    comp_map = {}
-    for comp, lbl in zip(components, labels):
-        for n in comp:
-            comp_map[n] = lbl
-
-    for node in sorted(adj.keys()):
-        if node not in added:
-            combined = "{" + ", ".join(sorted(comp_map.get(node, set()) | {node})) + "}"
-            net.add_node(node, label=f"{node}:\n{combined}", shape="ellipse")
-            added.add(node)
-
-    # Arêtes
-    G = nx.DiGraph()
-    for src, dsts in adj.items():
-        for dst in dsts:
-            G.add_edge(src, dst)
-
-    # Réduction transitive si DAG
-    if nx.is_directed_acyclic_graph(G):
-        G = nx.transitive_reduction(G)
-    for u, v in G.edges():
-        net.add_edge(u, v, arrows="to")
-
-    html_str = net.generate_html()
-    st_html(html_str, height=980, scrolling=True)
-
-
-def draw_equivalence_graph(components, labels, simplified_edges):
-    """Graphe des classes d’équivalence (boîtes) + ordre partiel réduit."""
-    net = Network(notebook=False, height='950px', width='100%', directed=True, cdn_resources='in_line')
-
-    # Boîtes (une par composante fortement connexe)
-    base = 10_000
-    for i, (comp, lbl) in enumerate(zip(components, labels)):
-        name = ", ".join(comp)
-        combined = "{" + ", ".join(sorted(lbl | set(comp))) + "}"
-        text = f"| {name}: {combined} |"
-        net.add_node(base + i, label=text, shape="box")
-
-    # Arêtes entre boîtes (ordre partiel simplifié)
-    def idx_of(target_set):
-        for i, s in enumerate(labels):
-            if s == target_set:
-                return i
-        return None
-
-    for src_set, dst_set in simplified_edges:
-        si = idx_of(src_set)
-        di = idx_of(dst_set)
-        if si is not None and di is not None:
-            net.add_edge(base + si, base + di, arrows="to")
-
-    html_str = net.generate_html()
-    st_html(html_str, height=980, scrolling=True)
-
 # =============== PYVIS (Streamlit) =========================
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
