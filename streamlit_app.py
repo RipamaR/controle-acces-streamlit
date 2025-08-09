@@ -404,21 +404,13 @@ def process_data_display(df: pd.DataFrame):
     with col1:
         display_entities_table(scc, labels)
     with col2:
-        display_role_table_streamlit(df_expanded)  # s’affiche vide/léger si pas de rôles
+        display_role_table_streamlit(df_expanded)
 
     st.markdown("---")
-
-    # Edges simplifiés pour le graphe des équivalences
     simplified_edges = simplify_relations(labels)
+    draw_combined_graph(scc, adj, labels, scc, labels, simplified_edges,
+                        role_data=df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {})
 
-    # Deux graphes : entités (flux) + classes d’équivalence (ordre partiel)
-    g1, g2 = st.columns([1, 1], gap="large")
-    with g1:
-        st.subheader("Graphe des entités (flux)")
-        draw_entities_graph(adj, scc, labels)
-    with g2:
-        st.subheader("Graphe des classes d’équivalence (ordre partiel réduit)")
-        draw_equivalence_graph(scc, labels, simplified_edges)
 
 # =============== TERMINAL DE COMMANDES =====================
 def apply_prompt(df: pd.DataFrame, prompt: str):
