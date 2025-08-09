@@ -652,7 +652,6 @@ def main():
                 st.error(f"Erreur de lecture du fichier: {e}")
 
     # ------- Onglet Terminal -------
-   # ------- Onglet Terminal -------
 with tabs[1]:
     st.markdown(
         "Tape une commande puis **Entrée** (ex: `AddSub S1 R1`, `AddRole R1`, "
