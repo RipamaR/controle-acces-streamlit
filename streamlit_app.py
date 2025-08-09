@@ -1,6 +1,3 @@
-** bon code 
-
-
 # streamlit_app.py
 # -----------------------------------------------------------
 # Application Streamlit pour contrôle d'accès (RBAC, DAC, China-Wall)
