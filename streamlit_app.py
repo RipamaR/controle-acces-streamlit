@@ -12,8 +12,6 @@ import networkx as nx
 import streamlit as st
 from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
-import streamlit as st
-st.set_page_config(layout="wide")
 
 
 # ===================== CONFIG UI ===========================
@@ -288,8 +286,8 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     """)
 
     # Rendu Streamlit (clé du problème)
-    html_code = net.generate_html()
-    html(html_code, height=800, width=1500)  # largeur plus grande
+    html_str = net.generate_html()
+    st_html(html_str, height=1000,width=1500 scrolling=True)
 
 # =============== RBAC : propagation depuis Excel ===========
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
