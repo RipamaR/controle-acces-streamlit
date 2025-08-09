@@ -612,23 +612,29 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
     return df, "❌ Unknown command."
 
 # ======================= UI ================================
+# ======================= UI ================================
 def _run_command_callback():
-    cmd = st.session_state.cmd_input.strip()
+    """Exécuté quand on appuie Entrée dans le champ de commande."""
+    cmd = st.session_state.get("cmd_input", "").strip()
     if not cmd:
         return
     st.session_state.global_data, message = apply_prompt(st.session_state.global_data, cmd)
     st.session_state.history.append(f"C:\\> {cmd}\n{message}")
-    st.session_state.cmd_input = ""   # vider la ligne de commande
-    st.rerun()                        # nouvelle API
+    st.session_state.cmd_input = ""   # vider le champ
+    st.rerun()                        # nouvelle API (remplace experimental_rerun)
 
 def main():
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
 
+    # Crée bien les 2 onglets et stocke la liste dans 'tabs'
     tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal de commandes"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
-        up = st.file_uploader("Importer un fichier Excel (colonnes: Source, Permission, Target, Role, Heritage optionnelle)", type=["xlsx"])
+        up = st.file_uploader(
+            "Importer un fichier Excel (colonnes: Source, Permission, Target, Role, Heritage optionnelle)",
+            type=["xlsx"]
+        )
         if up:
             try:
                 df = pd.read_excel(io.BytesIO(up.read()))
@@ -652,23 +658,22 @@ def main():
                 st.error(f"Erreur de lecture du fichier: {e}")
 
     # ------- Onglet Terminal -------
-with tabs[1]:
-    st.markdown(
-        "Tape une commande puis **Entrée** (ex: `AddSub S1 R1`, `AddRole R1`, "
-        "`GrantPermission R1 R O1`, `AddCh E1 E2`, `S2 AddObj O2`, "
-        "`S2 Grant S3 O2 R`, `show`, `Never {A,B} for E1`, …)"
-    )
+    with tabs[1]:
+        st.markdown(
+            "Tape une commande puis **Entrée** (ex: `AddSub S1 R1`, `AddRole R1`, "
+            "`GrantPermission R1 R O1`, `AddCh E1 E2`, `S2 AddObj O2`, "
+            "`S2 Grant S3 O2 R`, `show`, `Never {A,B} for E1`, …)"
+        )
 
-    # Champ de saisie + callback automatique sur Entrée
-    st.text_input(
-        "C:\\>",
-        key="cmd_input",
-        placeholder="Ex: AddSub S1 R1",
-        on_change=_run_command_callback,
-    )
+        # Champ de saisie + callback automatique sur Entrée
+        st.text_input(
+            "C:\\>",
+            key="cmd_input",
+            placeholder="Ex: AddSub S1 R1",
+            on_change=_run_command_callback,
+        )
 
-    st.text_area("Historique", "\n\n".join(st.session_state.history), height=320)
-
+        st.text_area("Historique", "\n\n".join(st.session_state.history), height=320)
 
 if __name__ == "__main__":
     main()
