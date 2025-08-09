@@ -287,7 +287,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
 
     # Rendu Streamlit (clé du problème)
     html_str = net.generate_html()
-    st_html(html_str, height=1000,width=1500 scrolling=True)
+    st_html(html_str, height=1000,width=1500, scrolling=True)
 
 # =============== RBAC : propagation depuis Excel ===========
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
