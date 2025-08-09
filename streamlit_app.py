@@ -12,6 +12,9 @@ import networkx as nx
 import streamlit as st
 from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
+import streamlit as st
+st.set_page_config(layout="wide")
+
 
 # ===================== CONFIG UI ===========================
 st.set_page_config(page_title="Contrôle d'accès – RBAC / DAC / China-Wall",
