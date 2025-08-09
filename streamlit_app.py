@@ -276,6 +276,31 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         if si is not None and di is not None:
             net.add_edge(base_idx + si, base_idx + di, arrows="to")
 
+# Ajout des nœuds (annotés avec leurs labels propagés) Ripama
+    added = set()
+    comp_map = {}
+    for comp, lbl in zip(components, labels):
+        for n in comp:
+            comp_map[n] = lbl
+
+    for node in sorted(adj.keys()):
+        if node not in added:
+            combined = "{" + ", ".join(sorted(comp_map.get(node, set()) | {node})) + "}"
+            net.add_node(node, label=f"{node}:\n{combined}", shape="ellipse")
+            added.add(node)
+
+    # Arêtes
+    G = nx.DiGraph()
+    for src, dsts in adj.items():
+        for dst in dsts:
+            G.add_edge(src, dst)
+
+    # Réduction transitive si DAG
+    if nx.is_directed_acyclic_graph(G):
+        G = nx.transitive_reduction(G)
+    for u, v in G.edges():
+        net.add_edge(u, v, arrows="to")
+
     net.set_options("""
     var options = {
       "nodes": {"font": {"size": 50}, "shapeProperties": {"borderRadius": 5}, "size": 40, "fixed": {"x": false, "y": false}},
