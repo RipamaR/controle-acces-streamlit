@@ -1,7 +1,7 @@
 # streamlit_app.py
 # -----------------------------------------------------------
-# Application Streamlit pour contrôle d'accès (RBAC, DAC, China-Wall)
-# Affichage plein écran / pleine largeur + rendu PyVis en HTML
+# Contrôle d'accès (RBAC, DAC, China-Wall) - Streamlit
+# Deux graphes sur une seule page, largeur complète, layout fixe (pas flottant)
 # -----------------------------------------------------------
 
 import io
@@ -200,44 +200,77 @@ def display_role_table_streamlit(df: pd.DataFrame):
     st.markdown("### Table des rôles et permissions")
     st.dataframe(df_role, use_container_width=True)
 
-def draw_entities_graph(adj, components, labels):
-    """Graphe des entités (nœuds = entités, arêtes = flux, TR si DAG)."""
-    net = Network(notebook=False, height='950px', width='100%', directed=True, cdn_resources='in_line')
+# =============== OPTIONS VIS / LAYOUT FIXE =================
+VIS_OPTIONS_FIXED = """
+var options = {
+  "nodes": {
+    "font": {"size": 40},
+    "shapeProperties": {"borderRadius": 5},
+    "size": 25
+  },
+  "edges": {
+    "width": 3,
+    "arrows": {"to": {"enabled": true, "scaleFactor": 1.2}},
+    "smooth": {"enabled": false}
+  },
+  "physics": {"enabled": false},
+  "layout": {
+    "hierarchical": {
+      "enabled": true,
+      "direction": "LR",
+      "sortMethod": "directed",
+      "levelSeparation": 220,
+      "nodeSpacing": 180
+    }
+  },
+  "interaction": {
+    "dragNodes": false,
+    "dragView": false,
+    "zoomView": false,
+    "selectable": true
+  }
+}
+"""
 
-    # Ajout des nœuds (annotés avec leurs labels propagés)
-    added = set()
-    comp_map = {}
+# =============== PYVIS (graphe des entités) =================
+def draw_entities_graph(adj, components, labels, role_data=None):
+    """Graphe des entités (nœuds = entités, arêtes = flux) — layout fixe, pas flottant."""
+    net = Network(notebook=False, height='900px', width='100%', directed=True, cdn_resources='in_line')
+
+    # Annoter chaque nœud
+    comp_lbl = {}
     for comp, lbl in zip(components, labels):
         for n in comp:
-            comp_map[n] = lbl
+            comp_lbl[n] = lbl
 
     for node in sorted(adj.keys()):
-        if node not in added:
-            combined = "{" + ", ".join(sorted(comp_map.get(node, set()) | {node})) + "}"
-            net.add_node(node, label=f"{node}:\n{combined}", shape="ellipse")
-            added.add(node)
+        node_roles = ""
+        if role_data and str(node).startswith("S"):
+            rr = role_data.get(node, "")
+            if rr:
+                node_roles = f"({rr})"
+        combined = "{" + ", ".join(sorted(comp_lbl.get(node, set()) | {node})) + "}"
+        lab = f"{node}{node_roles}:\n{combined}"
+        shape = "ellipse" if str(node).startswith("S") else ("box" if str(node).startswith("O") else "ellipse")
+        net.add_node(node, label=lab, shape=shape)
 
     # Arêtes
-    G = nx.DiGraph()
     for src, dsts in adj.items():
         for dst in dsts:
-            G.add_edge(src, dst)
+            net.add_edge(src, dst, arrows="to")
 
-    # Réduction transitive si DAG
-    if nx.is_directed_acyclic_graph(G):
-        G = nx.transitive_reduction(G)
-    for u, v in G.edges():
-        net.add_edge(u, v, arrows="to")
+    # Options fixes (pas de drag)
+    net.set_options(VIS_OPTIONS_FIXED)
 
+    # Rendu
     html_str = net.generate_html()
-    st_html(html_str, height=980, scrolling=True)
+    st_html(html_str, height=930, scrolling=True)
 
-
+# =============== PYVIS (graphe des équivalences) ============
 def draw_equivalence_graph(components, labels, simplified_edges):
-    """Graphe des classes d’équivalence (boîtes) + ordre partiel réduit."""
-    net = Network(notebook=False, height='950px', width='100%', directed=True, cdn_resources='in_line')
+    """Graphe des classes d’équivalence (boîtes) + ordre partiel — layout fixe, pas flottant."""
+    net = Network(notebook=False, height='900px', width='100%', directed=True, cdn_resources='in_line')
 
-    # Boîtes (une par composante fortement connexe)
     base = 10_000
     for i, (comp, lbl) in enumerate(zip(components, labels)):
         name = ", ".join(comp)
@@ -245,7 +278,7 @@ def draw_equivalence_graph(components, labels, simplified_edges):
         text = f"| {name}: {combined} |"
         net.add_node(base + i, label=text, shape="box")
 
-    # Arêtes entre boîtes (ordre partiel simplifié)
+    # Index par set
     def idx_of(target_set):
         for i, s in enumerate(labels):
             if s == target_set:
@@ -258,97 +291,10 @@ def draw_equivalence_graph(components, labels, simplified_edges):
         if si is not None and di is not None:
             net.add_edge(base + si, base + di, arrows="to")
 
+    net.set_options(VIS_OPTIONS_FIXED)
+
     html_str = net.generate_html()
-    st_html(html_str, height=980, scrolling=True)
-
-# =============== PYVIS (Streamlit) =========================
-def draw_combined_graph(components_1, adj_1, labels_1,
-                        components_2, labels_2, simplified_edges_2, role_data):
-    # Important: notebook=False + rendu via st_html
-    net = Network(notebook=False, height='1000px', width='100%', directed=True, cdn_resources='in_line')
-
-    sorted_components_1 = sorted(components_1, key=len, reverse=True)
-    sorted_components_2 = sorted(components_2, key=len, reverse=True)
-
-    x_gap = 300
-    y_gap = 250
-    current_y_subject = 0
-    current_y_object = 0
-    node_indices = {}
-    G1 = nx.DiGraph()
-
-    role_to_subject = {subject: role_data.get(subject, "No role") for subject in adj_1.keys()}
-
-    # Colonne gauche: Sujets (ellipse) ; Colonne droite: Objets (box)
-    for component, label in zip(sorted_components_1, labels_1):
-        subjects = [s for s in component if str(s).startswith("S")]
-        objects = [o for o in component if str(o).startswith("O")]
-
-        for subj in subjects:
-            roles = role_to_subject.get(subj, "No role")
-            combined_labels = '{' + ', '.join(sorted(label | {subj})) + '}'
-            text = f'{subj}({roles}):\n{combined_labels}'
-            net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-current_y_subject * y_gap)
-            node_indices[subj] = subj
-            current_y_subject += 1
-
-        for obj in objects:
-            combined_labels = '{' + ', '.join(sorted(label | {obj})) + '}'
-            net.add_node(obj, label=f'{obj}:\n{combined_labels}', shape='box', x=x_gap, y=-current_y_object * y_gap)
-            node_indices[obj] = obj
-            current_y_object += 1
-
-    # Arêtes (DAG => réduction transitive)
-    for src, dest_list in adj_1.items():
-        for dest in dest_list:
-            if src in node_indices and dest in node_indices:
-                G1.add_edge(src, dest)
-
-    if nx.is_directed_acyclic_graph(G1):
-        G1 = nx.transitive_reduction(G1)
-
-    for src, dest in G1.edges():
-        net.add_edge(src, dest, arrows="to")
-
-    # Boîtes classes d'équivalence
-    positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
-    offset_y = y_gap
-    base_idx = len(net.get_nodes())
-
-    for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
-        entity_name = ', '.join(component)
-        combined_labels = '{' + ', '.join(sorted(label | set(component))) + '}'
-        text = f'| {entity_name}: {combined_labels} |'
-        col_index = i % 3
-        row_index = i // 3
-        x, y = positions[col_index]
-        y += row_index * offset_y
-        net.add_node(base_idx + i, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
-
-    def find_idx_by_labelset(target_set):
-        for i, lbl in enumerate(labels_2):
-            if lbl == target_set:
-                return i
-        return None
-
-    for src_set, dest_set in simplified_edges_2:
-        si = find_idx_by_labelset(src_set)
-        di = find_idx_by_labelset(dest_set)
-        if si is not None and di is not None:
-            net.add_edge(base_idx + si, base_idx + di, arrows="to")
-
-    net.set_options("""
-    var options = {
-      "nodes": {"font": {"size": 50}, "shapeProperties": {"borderRadius": 5}, "size": 40, "fixed": {"x": false, "y": false}},
-      "edges": {"width": 4, "arrows": {"to": {"enabled": true, "scaleFactor": 1.5}}, "length": 150, "smooth": {"enabled": false}},
-      "physics": {"enabled": false},
-      "interaction": {"dragNodes": true, "dragView": true, "zoomView": true}
-    }
-    """)
-
-    # Rendu Streamlit (clé du problème)
-    html_str = net.generate_html()
-    st_html(html_str, height=1000,width=1800, scrolling=True)
+    st_html(html_str, height=930, scrolling=True)
 
 # =============== RBAC : propagation depuis Excel ===========
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
@@ -408,36 +354,6 @@ def violates_china_wall(labels):
     return False, ""
 
 # =============== VISUALISATION COMPLÈTE ====================
-def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
-    """
-    Charge un Excel au format 'entités simples' avec colonnes: Entity1, Entity2.
-    Convention: 'E1  E2' signifie que E2 lit E1  =>  Source=E2, Permission='R', Target=E1.
-    Retourne un DataFrame normalisé: [Source, Permission, Target, Role, Heritage]
-    """
-    df_raw = pd.read_excel(io.BytesIO(file_bytes))
-    cols = {c.strip().lower() for c in df_raw.columns}
-    if not ({"entity1", "entity2"} <= cols):
-        raise ValueError("Le fichier 'entités' doit contenir les colonnes Entity1 et Entity2.")
-
-    # Normalisation des noms (au cas où)
-    # On récupère les colonnes exactes par insensibilité à la casse
-    col_map = {c.lower(): c for c in df_raw.columns}
-    col_e1 = col_map["entity1"]
-    col_e2 = col_map["entity2"]
-
-    rows = []
-    for _, row in df_raw.iterrows():
-        e1 = str(row[col_e1]).strip()
-        e2 = str(row[col_e2]).strip()
-        if e1 and e1.lower() != "nan" and e2 and e2.lower() != "nan":
-            # E2 lit E1  => Target = E1, Source = E2, Permission = R
-            rows.append({"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None})
-
-    if not rows:
-        raise ValueError("Aucune paire valide (Entity1, Entity2) trouvée dans le fichier.")
-
-    return pd.DataFrame(rows, columns=["Source", "Permission", "Target", "Role", "Heritage"])
-
 def process_data_display(df: pd.DataFrame):
     if df is None or df.empty:
         st.info("Aucune donnée à afficher.")
@@ -460,25 +376,29 @@ def process_data_display(df: pd.DataFrame):
         st.error(f"⛔ CHINA-WALL: {msg}")
         return
 
-       # 5) Tables + Graphes (plein écran/largeur)
-    col1, col2 = st.columns([1, 1], gap="large")
-    with col1:
-        display_entities_table(scc, labels)
-    with col2:
-        display_role_table_streamlit(df_expanded)  # s’affiche vide/léger si pas de rôles
+    # 5) Tables
+    display_entities_table(scc, labels)
+    display_role_table_streamlit(df_expanded)
 
+    # 6) Deux graphes sur UNE SEULE PAGE, fixes (pas flottants)
     st.markdown("---")
+    st.subheader("Visualisations")
+    # Récup rôles par sujet pour annoter le graphe des entités
+    role_data = {}
+    if "Role" in df_expanded.columns:
+        role_data = (
+            df_expanded.groupby("Source")["Role"]
+            .apply(lambda s: ",".join(sorted({r for r in s if pd.notna(r) and str(r).strip()})))
+            .to_dict()
+        )
 
-    # Edges simplifiés pour le graphe des équivalences
     simplified_edges = simplify_relations(labels)
 
-    # Deux graphes : entités (flux) + classes d’équivalence (ordre partiel)
-    g1, g2 = st.columns([1, 1], gap="large")
-    with g1:
-        st.subheader("Graphe des entités (flux)")
-        draw_entities_graph(adj, scc, labels)
-    with g2:
-        st.subheader("Graphe des classes d’équivalence (ordre partiel réduit)")
+    # On empile les deux graphes verticalement dans le même conteneur
+    with st.container(border=False):
+        st.markdown("#### Graphe des entités (flux)")
+        draw_entities_graph(adj, scc, labels, role_data=role_data)
+        st.markdown("#### Graphe des classes d’équivalence (ordre partiel réduit)")
         draw_equivalence_graph(scc, labels, simplified_edges)
 
 # =============== TERMINAL DE COMMANDES =====================
@@ -712,56 +632,48 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
     return df, "❌ Unknown command."
 
 # ======================= UI ================================
-# ======================= UI ================================
-def _run_command_callback():
-    """Exécuté quand on appuie Entrée dans le champ de commande."""
-    cmd = st.session_state.get("cmd_input", "").strip()
-    if not cmd:
-        return
-    st.session_state.global_data, message = apply_prompt(st.session_state.global_data, cmd)
-    st.session_state.history.append(f"C:\\> {cmd}\n{message}")
-    st.session_state.cmd_input = ""   # vider le champ
-    st.rerun()                        # nouvelle API (remplace experimental_rerun)
-
 def main():
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
 
-    # Crée bien les 2 onglets et stocke la liste dans 'tabs'
     tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal de commandes"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
-        st.write("Vous pouvez charger soit un fichier **RBAC** (colonnes: Source, Permission, Target, Role), "
-                 "soit un fichier **Entités** (colonnes: Entity1, Entity2).")
         up = st.file_uploader(
-            "Importer un fichier Excel",
-            type=["xlsx"],
-            help="Formats acceptés : (1) Source, Permission, Target, Role ; (2) Entity1, Entity2"
+            "Importer un fichier Excel :\n"
+            "- RBAC: colonnes [Source, Permission, Target, Role]\n"
+            "- Entités simples: colonnes [Entity1, Entity2] (E2 lit E1)",
+            type=["xlsx"]
         )
         if up:
             try:
-                # On lit une fois pour détecter les colonnes
-                df_probe = pd.read_excel(io.BytesIO(up.read()))
-                up.seek(0)  # on remet le curseur au début pour relire
+                df_raw = pd.read_excel(io.BytesIO(up.read()))
 
-                cols_lower = {c.strip().lower() for c in df_probe.columns}
+                # Détection format
+                cols = {c.strip(): c for c in df_raw.columns}
+                is_entities = ("Entity1" in cols) and ("Entity2" in cols)
+                is_rbac = ("Source" in cols) and ("Permission" in cols) and ("Target" in cols)
 
-                if {"entity1", "entity2"} <= cols_lower:
-                    # Format ENTITÉS simples
-                    df = load_entities_excel(up.read())
+                if is_entities:
+                    # Conversion entités -> format interne (R par défaut)
+                    tmp = pd.DataFrame(columns=["Source", "Permission", "Target", "Role", "Heritage"])
+                    for _, row in df_raw.iterrows():
+                        src = row[cols["Entity2"]]  # lecteur
+                        tgt = row[cols["Entity1"]]  # lu
+                        tmp = pd.concat([tmp, pd.DataFrame([{
+                            "Source": src, "Permission": "R", "Target": tgt, "Role": None, "Heritage": None
+                        }])], ignore_index=True)
+                    df = tmp
+
+                elif is_rbac:
+                    df = df_raw.rename(columns=cols).copy()
+                    for c in ["Role", "Heritage"]:
+                        if c not in df.columns:
+                            df[c] = None
                 else:
-                    # Format RBAC
-                    df = pd.read_excel(io.BytesIO(up.read()))
-                    required = {"Source", "Permission", "Target"}
-                    missing = required - set(df.columns)
-                    if missing:
-                        raise ValueError(f"Colonnes manquantes: {missing}")
-                    if "Role" not in df.columns:
-                        df["Role"] = None
-                    if "Heritage" not in df.columns:
-                        df["Heritage"] = None
+                    st.error("Colonnes non reconnues. Utilisez [Entity1, Entity2] ou [Source, Permission, Target (, Role)].")
+                    return
 
-                # Sauvegarde en session + affichage
                 st.session_state.global_data = df
                 st.success("✅ Fichier chargé.")
                 with st.expander("Voir les données chargées"):
@@ -773,22 +685,15 @@ def main():
             except Exception as e:
                 st.error(f"Erreur de lecture du fichier: {e}")
 
-
     # ------- Onglet Terminal -------
     with tabs[1]:
-        st.markdown(
-            "Tape une commande puis **Entrée** (ex: `AddSub S1 R1`, `AddRole R1`, "
-            "`GrantPermission R1 R O1`, `AddCh E1 E2`, `S2 AddObj O2`, "
-            "`S2 Grant S3 O2 R`, `show`, `Never {A,B} for E1`, …)"
-        )
-
-        # Champ de saisie + callback automatique sur Entrée
-        st.text_input(
-            "C:\\>",
-            key="cmd_input",
-            placeholder="Ex: AddSub S1 R1",
-            on_change=_run_command_callback,
-        )
+        st.markdown("Tape une commande puis valide (ex: `AddSub S1 R1`, `AddRole R1`, `GrantPermission R1 R O1`, `AddCh E1 E2`, `S2 AddObj O2`, `S2 Grant S3 O2 R`, `Never {A,B} for E1`, `show`, …)")
+        with st.form("terminal_form", clear_on_submit=True):
+            cmd = st.text_input("C:\\>", value="", placeholder="Ex: AddSub S1 R1")
+            submitted = st.form_submit_button("Exécuter")
+        if submitted and cmd:
+            st.session_state.global_data, message = apply_prompt(st.session_state.global_data, cmd)
+            st.session_state.history.append(f"C:\\> {cmd}\n{message}")
 
         st.text_area("Historique", "\n\n".join(st.session_state.history), height=320)
 
