@@ -347,6 +347,36 @@ def violates_china_wall(labels):
     return False, ""
 
 # =============== VISUALISATION COMPLÈTE ====================
+def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
+    """
+    Charge un Excel au format 'entités simples' avec colonnes: Entity1, Entity2.
+    Convention: 'E1  E2' signifie que E2 lit E1  =>  Source=E2, Permission='R', Target=E1.
+    Retourne un DataFrame normalisé: [Source, Permission, Target, Role, Heritage]
+    """
+    df_raw = pd.read_excel(io.BytesIO(file_bytes))
+    cols = {c.strip().lower() for c in df_raw.columns}
+    if not ({"entity1", "entity2"} <= cols):
+        raise ValueError("Le fichier 'entités' doit contenir les colonnes Entity1 et Entity2.")
+
+    # Normalisation des noms (au cas où)
+    # On récupère les colonnes exactes par insensibilité à la casse
+    col_map = {c.lower(): c for c in df_raw.columns}
+    col_e1 = col_map["entity1"]
+    col_e2 = col_map["entity2"]
+
+    rows = []
+    for _, row in df_raw.iterrows():
+        e1 = str(row[col_e1]).strip()
+        e2 = str(row[col_e2]).strip()
+        if e1 and e1.lower() != "nan" and e2 and e2.lower() != "nan":
+            # E2 lit E1  => Target = E1, Source = E2, Permission = R
+            rows.append({"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None})
+
+    if not rows:
+        raise ValueError("Aucune paire valide (Entity1, Entity2) trouvée dans le fichier.")
+
+    return pd.DataFrame(rows, columns=["Source", "Permission", "Target", "Role", "Heritage"])
+
 def process_data_display(df: pd.DataFrame):
     if df is None or df.empty:
         st.info("Aucune donnée à afficher.")
@@ -631,31 +661,48 @@ def main():
 
     # ------- Onglet Excel -------
     with tabs[0]:
+        st.write("Vous pouvez charger soit un fichier **RBAC** (colonnes: Source, Permission, Target, Role), "
+                 "soit un fichier **Entités** (colonnes: Entity1, Entity2).")
         up = st.file_uploader(
-            "Importer un fichier Excel (colonnes: Source, Permission, Target, Role, Heritage optionnelle)",
-            type=["xlsx"]
+            "Importer un fichier Excel",
+            type=["xlsx"],
+            help="Formats acceptés : (1) Source, Permission, Target, Role ; (2) Entity1, Entity2"
         )
         if up:
             try:
-                df = pd.read_excel(io.BytesIO(up.read()))
-                required = {"Source", "Permission", "Target"}
-                missing = required - set(df.columns)
-                if missing:
-                    st.error(f"Colonnes manquantes: {missing}")
+                # On lit une fois pour détecter les colonnes
+                df_probe = pd.read_excel(io.BytesIO(up.read()))
+                up.seek(0)  # on remet le curseur au début pour relire
+
+                cols_lower = {c.strip().lower() for c in df_probe.columns}
+
+                if {"entity1", "entity2"} <= cols_lower:
+                    # Format ENTITÉS simples
+                    df = load_entities_excel(up.read())
                 else:
+                    # Format RBAC
+                    df = pd.read_excel(io.BytesIO(up.read()))
+                    required = {"Source", "Permission", "Target"}
+                    missing = required - set(df.columns)
+                    if missing:
+                        raise ValueError(f"Colonnes manquantes: {missing}")
                     if "Role" not in df.columns:
                         df["Role"] = None
                     if "Heritage" not in df.columns:
                         df["Heritage"] = None
-                    st.session_state.global_data = df
-                    st.success("✅ Fichier chargé.")
-                    with st.expander("Voir les données chargées"):
-                        st.dataframe(df, use_container_width=True)
 
-                    st.markdown("---")
-                    process_data_display(df)
+                # Sauvegarde en session + affichage
+                st.session_state.global_data = df
+                st.success("✅ Fichier chargé.")
+                with st.expander("Voir les données chargées"):
+                    st.dataframe(df, use_container_width=True)
+
+                st.markdown("---")
+                process_data_display(df)
+
             except Exception as e:
                 st.error(f"Erreur de lecture du fichier: {e}")
+
 
     # ------- Onglet Terminal -------
     with tabs[1]:
