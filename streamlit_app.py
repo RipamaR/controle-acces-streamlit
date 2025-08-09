@@ -279,7 +279,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
 # Ajout des nœuds (annotés avec leurs labels propagés) Ripama
     added = set()
     comp_map = {}
-    for comp, lbl in zip(components, labels):
+    for comp, lbl in zip(components_1, labels):
         for n in comp:
             comp_map[n] = lbl
 
