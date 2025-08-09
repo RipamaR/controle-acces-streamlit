@@ -2,5 +2,5 @@ streamlit
 pandas
 networkx
 pyvis
-matplotlib
 openpyxl
+matplotlib
