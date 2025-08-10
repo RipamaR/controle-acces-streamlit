@@ -414,13 +414,15 @@ def process_data_display(df: pd.DataFrame):
 
 
 # =============== TERMINAL DE COMMANDES =====================
-parts = prompt.strip().split()
-if not parts[0]:
+def apply_prompt(df: pd.DataFrame, prompt: str):
+    parts = prompt.strip().split()
+    if not parts:
         return df, "❌ Empty command."
 
     cmd = parts[0]
     args = parts[1:]
     msg = ""
+
 
 
     # — ENTITÉS (modèle entité simple) —
