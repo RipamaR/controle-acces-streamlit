@@ -415,7 +415,7 @@ def process_data_display(df: pd.DataFrame):
 
 # =============== TERMINAL DE COMMANDES =====================
 parts = prompt.strip().split()
-    if not parts:
+if not parts:
         return df, "❌ Empty command."
 
     cmd = parts[0]
