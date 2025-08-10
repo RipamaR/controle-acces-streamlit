@@ -482,7 +482,7 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
             return df, f"🚧 Globally forbidden combination: {etiquette}"
 
     # — RBAC —
-      # ---- Création d'objet (syntaxe courte) : AddObj O1 ----
+         # ---- RBAC: création d'objet (syntaxe courte) ----
     if cmd == "AddObj":
         if len(args) != 1:
             return df, "❌ Usage: AddObj O1"
@@ -490,11 +490,15 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
         if obj in st.session_state.objets_definis:
             return df, f"ℹ️ The object '{obj}' already exists."
         st.session_state.objets_definis.add(obj)
-        # on ajoute une ligne "placeholder" pour matérialiser l'objet (sans propriétaire)
-        new_row = {c: None for c in df.columns}
-        new_row.update({"Source": obj})
+        # matérialiser l’objet dans le DF (placeholder sans effet sur le graphe)
+        new_row = {"Source": obj, "Permission": None, "Target": None, "Role": None, "Heritage": None}
+        # s'assurer que toutes les colonnes existent
+        for col in ["Source", "Permission", "Target", "Role", "Heritage"]:
+            if col not in df.columns:
+                df[col] = None
         df = pd.concat([df, pd.DataFrame([new_row], columns=df.columns)], ignore_index=True)
-        return df, f"✅ Object '{obj}' created (no owner)."
+        return df, f"✅ Object '{obj}' created."
+
 
     if cmd == "AddRole":
         if len(args) != 1:
