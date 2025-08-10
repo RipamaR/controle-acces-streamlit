@@ -419,7 +419,6 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
     if not parts:
         return df, "❌ Empty command."
 
-    parts = prompt.split()
     cmd = parts[0]
     args = parts[1:]
     msg = ""
