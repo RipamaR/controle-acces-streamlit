@@ -480,9 +480,19 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
             etiquette = [e.strip("{} ,") for e in args]
             st.session_state.interdictions_globales.append(etiquette)
             return df, f"🚧 Globally forbidden combination: {etiquette}"
+              
+  # S'assure que les colonnes existent toujours
+    def ensure_cols(df):
+        for col in ["Source", "Permission", "Target", "Role", "Heritage"]:
+            if col not in df.columns:
+                df[col] = None
+        return df
+
+    df = ensure_cols(df)
+
 
     # — RBAC —
-         # ---- RBAC: création d'objet (syntaxe courte) ----
+            # ---- RBAC: création d'objet (syntaxe courte) ----
     if cmd == "AddObj":
         if len(args) != 1:
             return df, "❌ Usage: AddObj O1"
@@ -490,68 +500,106 @@ def apply_prompt(df: pd.DataFrame, prompt: str):
         if obj in st.session_state.objets_definis:
             return df, f"ℹ️ The object '{obj}' already exists."
         st.session_state.objets_definis.add(obj)
-        # matérialiser l’objet dans le DF (placeholder sans effet sur le graphe)
         new_row = {"Source": obj, "Permission": None, "Target": None, "Role": None, "Heritage": None}
-        # s'assurer que toutes les colonnes existent
-        for col in ["Source", "Permission", "Target", "Role", "Heritage"]:
-            if col not in df.columns:
-                df[col] = None
         df = pd.concat([df, pd.DataFrame([new_row], columns=df.columns)], ignore_index=True)
         return df, f"✅ Object '{obj}' created."
 
 
-    if cmd == "AddRole":
+
+        if cmd == "AddRole":
         if len(args) != 1:
             return df, "❌ Usage: AddRole R1"
         role = args[0]
+        if role in st.session_state.roles_definis:
+            return df, f"ℹ️ Role '{role}' already exists."
         st.session_state.roles_definis.add(role)
         st.session_state.role_permissions.setdefault(role, set())
         return df, f"✅ Role '{role}' added."
 
-    if cmd == "AddSub":
-        # AddSub S1 [R1]
-        if len(args) < 1:
-            return df, "❌ Usage: AddSub S1 [R1]"
-        subj = args[0]
-        role = args[1] if len(args) > 1 else None
-        st.session_state.sujets_definis.add(subj)
-        st.session_state.subject_roles.setdefault(subj, set())
-        if role:
-            st.session_state.roles_definis.add(role)
-            st.session_state.subject_roles[subj].add(role)
-        row = {"Source": subj, "Permission": None, "Target": None, "Role": role}
-        df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
-        return df, f"✅ Subject '{subj}' added" + (f" with role '{role}'" if role else "")
 
-    if cmd == "GrantPermission":
+        if cmd == "GrantPermission":
         # GrantPermission R1 R O1
         if len(args) != 3:
             return df, "❌ Usage: GrantPermission R1 R O1"
         role, perm, obj = args
+
         if role not in st.session_state.roles_definis:
-            return df, f"❌ Role '{role}' is not defined."
+            return df, f"⛔ Error: Role '{role}' does not exist."
+        if obj not in st.session_state.objets_definis:
+            return df, f"⛔ Error: Object '{obj}' does not exist. Use AddObj first."
+
         st.session_state.role_permissions.setdefault(role, set()).add((perm, obj))
-        # Propagation aux sujets ayant ce rôle
+
+        # Propagation aux sujets qui ont DEJA ce rôle
         for subj, roles in st.session_state.subject_roles.items():
             if role in roles:
-                df = pd.concat([df, pd.DataFrame([{
-                    "Source": subj, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"
-                }])], ignore_index=True)
-        return df, f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated."
+                mask = (
+                    (df["Source"] == subj) &
+                    (df["Permission"] == perm) &
+                    (df["Target"] == obj) &
+                    (df["Role"] == role)
+                )
+                if not mask.any():
+                    df = pd.concat([df, pd.DataFrame([{
+                        "Source": subj, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"
+                    }], columns=df.columns)], ignore_index=True)
 
-    if cmd == "RevokePermission":
-        # RevokePermission R1 R O1
+        return df, f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated."
+    if cmd == "AddSub":
+        # AddSub S1 [R1]  (si R1 fourni, il doit exister)
+        if len(args) < 1:
+            return df, "❌ Usage: AddSub S1 [R1]"
+        subj = args[0]
+        role = args[1] if len(args) > 1 else None
+
+        if subj in st.session_state.sujets_definis:
+            return df, f"ℹ️ Subject '{subj}' already exists."
+
+        if role and role not in st.session_state.roles_definis:
+            return df, f"⛔ Error: Role '{role}' does not exist."
+
+        st.session_state.sujets_definis.add(subj)
+        st.session_state.subject_roles.setdefault(subj, set())
+
+        row = {"Source": subj, "Permission": None, "Target": None, "Role": role, "Heritage": None}
+        df = pd.concat([df, pd.DataFrame([row], columns=df.columns)], ignore_index=True)
+
+        if role:
+            st.session_state.subject_roles[subj].add(role)
+            # Hériter des permissions DEJA attribuées au rôle
+            for (perm, obj) in st.session_state.role_permissions.get(role, set()):
+                mask = (
+                    (df["Source"] == subj) &
+                    (df["Permission"] == perm) &
+                    (df["Target"] == obj) &
+                    (df["Role"] == role)
+                )
+                if not mask.any():
+                    df = pd.concat([df, pd.DataFrame([{
+                        "Source": subj, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"
+                    }], columns=df.columns)], ignore_index=True)
+
+        return df, f"✅ Subject '{subj}' added" + (f" with role '{role}'" if role else "")
+
+
+        if cmd == "RevokePermission":
         if len(args) != 3:
             return df, "❌ Usage: RevokePermission R1 R O1"
         role, perm, obj = args
+
         if role not in st.session_state.roles_definis:
             return df, f"⛔ Error: Role '{role}' does not exist."
+        if obj not in st.session_state.objets_definis:
+            return df, f"⛔ Error: Object '{obj}' does not exist."
+
         if role in st.session_state.role_permissions:
             st.session_state.role_permissions[role].discard((perm, obj))
+
         before = len(df)
         df = df[~((df["Permission"] == perm) & (df["Target"] == obj) & (df["Role"] == role))]
         deleted = before - len(df)
         return df, f"🗑️ Permission '{perm}' on '{obj}' revoked from role '{role}' ({deleted} propagation(s) removed)."
+
 
     if cmd == "DeassignUser":
         # DeassignUser S1 R1
