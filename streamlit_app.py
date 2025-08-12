@@ -879,3 +879,6 @@ def main():
             st.markdown("---")
             st.subheader("Graphes (issus des commandes)")
             process_data_display(st.session_state.global_data)
+if __name__ == "__main__":
+    main()
+
