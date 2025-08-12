@@ -853,20 +853,29 @@ def main():
                 st.error(f"Erreur de lecture du fichier: {e}")
 
     # ------- Onglet Terminal -------
-    with tabs[1]:
-        st.markdown(
-            "Tape une commande puis **Entrée** (ex: `AddObj O1`, `AddRole R1`, `GrantPermission R1 R O1`, "
-            "`AddSub S1 R1`, `AddCh E1 E2`, `S2 AddObj O2`, `S2 Grant S3 O2 R`, `Never {A,B} for E1`, `show`, …)"
-        )
+with tabs[1]:
+    st.markdown(
+        "Tape une commande puis **Entrée** (ex: `AddObj O1`, `AddRole R1`, `GrantPermission R1 R O1`, "
+        "`AddSub S1 R1`, `AddCh E1 E2`, `S2 AddObj O2`, `S2 Grant S3 O2 R`, "
+        "`Never {A,B} for E1`, `show`, …)"
+    )
 
-        st.text_input(
-            "C:\\>",
-            key="cmd_input",
-            placeholder="Ex: AddSub S1 R1",
-            on_change=_run_command_callback,
-        )
+    # Saisie + exécution
+    st.text_input(
+        "C:\\>",
+        key="cmd_input",
+        placeholder="Ex: AddSub S1 R1",
+        on_change=_run_command_callback,
+    )
 
-        st.text_area("Historique", "\n\n".join(st.session_state.history), height=340)
+    st.text_area("Historique", "\n\n".join(st.session_state.history), height=340)
+
+    # ✅ Afficher/mettre à jour les graphes après chaque commande
+    if not st.session_state.global_data.empty:
+        st.markdown("---")
+        st.subheader("Graphes (issus des commandes)")
+        process_data_display(st.session_state.global_data)
+
 
 
 if __name__ == "__main__":
