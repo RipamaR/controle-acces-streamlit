@@ -628,21 +628,44 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
        return df, "\n".join(out_msgs + [msg_err(f"⛔Error: '{owner}' is not the owner of '{obj}'.")])
 
     # S2 Grant S3 O2 R
-    if len(parts) >= 5 and parts[1] == "Grant":
-        owner, _, subject, obj, perm = parts[:5]
-        if owner not in st.session_state.sujets_definis:
-            return df, "\n".join(out_msgs + [msg_err(f"⛔ Error: Subject '{owner}' does not exist.")])
-        if subject not in st.session_state.sujets_definis:
-            return df, "\n".join(out_msgs + [msg_err(f"⛔ Error: Target subject '{subject}' does not exist.")])
-        if obj not in st.session_state.objets_definis:
-            return df, "\n".join(out_msgs + [msg_err(f"⛔ Error: Object '{obj}' does not exist.")])
-        # vérifier propriété
-        is_owner = ((df["Source"] == owner) & (df["Target"] == obj) & (df["Permission"] == "Owner")).any()
-        if not is_owner:
-            return df, "\n".join(out_msgs + [msg_err(f"⛔Error: '{owner}' is not the owner of '{obj}'.")]])
-        new_entry = {"Source": subject, "Target": obj, "Permission": perm, "Role": None, "Heritage": None}
-        df = pd.concat([df, pd.DataFrame([new_entry], columns=df.columns)], ignore_index=True)
-        return df, "\n".join(out_msgs + [msg_ok(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")])
+   # ✅ DAC – Attribution de permission par le propriétaire (ex : S2 Grant S3 O2 R)
+elif len(parts) >= 5 and parts[1] == "Grant":
+    owner, _, subject, obj, perm = parts[:5]
+
+    if owner not in st.session_state.sujets_definis:
+        messages.append(f"⛔ Error: Subject '{owner}' does not exist.")
+        return df, "\n".join(messages)
+
+    if subject not in st.session_state.sujets_definis:
+        messages.append(f"⛔ Error: Target subject '{subject}' does not exist.")
+        return df, "\n".join(messages)
+
+    if obj not in st.session_state.objets_definis:
+        messages.append(f"⛔ Error: Object '{obj}' does not exist.")
+        return df, "\n".join(messages)
+
+    # Vérification que 'owner' est bien propriétaire de 'obj'
+    is_owner = (
+        (df["Source"] == owner) &
+        (df["Target"] == obj) &
+        (df["Permission"] == "Owner")
+    ).any()
+
+    if is_owner:
+        new_entry = {
+            "Source": subject,
+            "Permission": perm,
+            "Target": obj,
+            "Role": None
+        }
+        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+        messages.append(
+            f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'."
+        )
+        return df, "\n".join(messages)
+    else:
+        messages.append(f"⛔ Error: '{owner}' is not the owner of '{obj}'.")
+        return df, "\n".join(messages)
 
     # ========== CHINA-WALL ==========
     if command == "Never":
