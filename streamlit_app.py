@@ -806,22 +806,15 @@ def _run_command_callback():
 def main():
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
 
-    # Création des onglets tout en haut du main()
-tabs = st.tabs(["Fichier Excel", "Terminal de commandes"])
-
-# Onglet Fichier Excel
-with tabs[0]:
-    # ton code Excel...
-
-# Onglet Terminal
-with tabs[1]:
-    # ton code Terminal...
-
+    # ✅ Crée les deux onglets AU DÉBUT du main
+    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal de commandes"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
-        st.write("Vous pouvez charger soit un fichier **RBAC** (colonnes: Source, Permission, Target, Role), "
-                 "soit un fichier **Entités** (colonnes: Entity1, Entity2).")
+        st.write(
+            "Vous pouvez charger soit un fichier **RBAC** (colonnes: Source, Permission, Target, Role), "
+            "soit un fichier **Entités** (colonnes: Entity1, Entity2)."
+        )
 
         up = st.file_uploader(
             "Importer un fichier Excel",
@@ -831,7 +824,8 @@ with tabs[1]:
         if up:
             try:
                 content = up.getvalue()
-                # Sonde les colonnes
+
+                # On sonde les colonnes pour choisir le parseur
                 df_probe = pd.read_excel(io.BytesIO(content))
                 cols_lower = {c.strip().lower() for c in df_probe.columns}
 
@@ -863,30 +857,25 @@ with tabs[1]:
                 st.error(f"Erreur de lecture du fichier: {e}")
 
     # ------- Onglet Terminal -------
-with tabs[1]:
-    st.markdown(
-        "Tape une commande puis **Entrée** (ex: `AddObj O1`, `AddRole R1`, `GrantPermission R1 R O1`, "
-        "`AddSub S1 R1`, `AddCh E1 E2`, `S2 AddObj O2`, `S2 Grant S3 O2 R`, "
-        "`Never {A,B} for E1`, `show`, …)"
-    )
+    with tabs[1]:
+        st.markdown(
+            "Tape une commande puis **Entrée** (ex: `AddObj O1`, `AddRole R1`, `GrantPermission R1 R O1`, "
+            "`AddSub S1 R1`, `AddCh E1 E2`, `S2 AddObj O2`, `S2 Grant S3 O2 R`, "
+            "`Never {A,B} for E1`, `show`, …)"
+        )
 
-    # Saisie + exécution
-    st.text_input(
-        "C:\\>",
-        key="cmd_input",
-        placeholder="Ex: AddSub S1 R1",
-        on_change=_run_command_callback,
-    )
+        # Saisie + exécution
+        st.text_input(
+            "C:\\>",
+            key="cmd_input",
+            placeholder="Ex: AddSub S1 R1",
+            on_change=_run_command_callback,  # <- doit exister plus haut
+        )
 
-    st.text_area("Historique", "\n\n".join(st.session_state.history), height=340)
+        st.text_area("Historique", "\n\n".join(st.session_state.history), height=340)
 
-    # ✅ Afficher/mettre à jour les graphes après chaque commande
-    if not st.session_state.global_data.empty:
-        st.markdown("---")
-        st.subheader("Graphes (issus des commandes)")
-        process_data_display(st.session_state.global_data)
-
-
-
-if __name__ == "__main__":
-    main()
+        # ✅ Afficher/mettre à jour les graphes après chaque commande
+        if not st.session_state.global_data.empty:
+            st.markdown("---")
+            st.subheader("Graphes (issus des commandes)")
+            process_data_display(st.session_state.global_data)
