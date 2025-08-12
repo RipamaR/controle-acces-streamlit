@@ -625,7 +625,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         st.session_state.objets_definis.add(obj)
         entry_owner = {"Source": owner, "Target": obj, "Permission": "Owner", "Role": None, "Heritage": None}
         df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
-        return df, "\n".join(out_msgs + [msg_ok(f"✅ Object '{obj}' created with owner '{owner}'")])
+       return df, "\n".join(out_msgs + [msg_err(f"⛔Error: '{owner}' is not the owner of '{obj}'.")])
 
     # S2 Grant S3 O2 R
     if len(parts) >= 5 and parts[1] == "Grant":
