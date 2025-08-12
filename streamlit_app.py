@@ -806,7 +806,17 @@ def _run_command_callback():
 def main():
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
 
-    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal de commandes"])
+    # Création des onglets tout en haut du main()
+tabs = st.tabs(["Fichier Excel", "Terminal de commandes"])
+
+# Onglet Fichier Excel
+with tabs[0]:
+    # ton code Excel...
+
+# Onglet Terminal
+with tabs[1]:
+    # ton code Terminal...
+
 
     # ------- Onglet Excel -------
     with tabs[0]:
