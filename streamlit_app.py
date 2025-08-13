@@ -481,7 +481,7 @@ if len(parts) >= 3 and parts[1] == "AddObj":
         (df["Permission"] == "R")
     )]
 
-    return df, "\n".join(out_msgs + [msg_ok(f"✅ Object '{obj}' created with owner '{owner}' (no read right).")])
+        return df, "\n".join(out_msgs + [msg_ok(f"✅ Object '{obj}' created with owner '{owner}' (no read right).")])
 
 
     # S2 Grant S3 O2 R  => seul le propriétaire peut accorder
