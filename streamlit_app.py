@@ -610,8 +610,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         return _normalize_df(df), "\n".join(out_msgs + [f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'."])
     if command == "ListEdges":
     # Affiche toutes les arêtes R/W réellement utilisées pour le graphe
-    dfe = global_data[global_data["Permission"]
-                      .apply(lambda x: isinstance(x, str) and x.strip().upper() in ("R", "W"))]
+    dfe = global_data[global_data["Permission"].apply(lambda x: isinstance(x, str) and x.strip().upper() in ("R", "W"))]
     if dfe.empty:
         return global_data, "ℹ️ Aucune arête R/W."
     edges = sorted({f"{t.strip()} -> {s.strip()} ({p.strip().upper()})"
