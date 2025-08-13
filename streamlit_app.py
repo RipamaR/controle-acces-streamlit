@@ -609,17 +609,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         df = pd.concat([df, pd.DataFrame([new_entry], columns=df.columns)], ignore_index=True)
         return _normalize_df(df), "\n".join(out_msgs + [f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'."])
 
-if command == "ClearEdges":
-    # ClearEdges O2  -> supprime toutes les R/W liées à O2 (utile si du bruit traîne)
-    if len(args) != 1:
-        return global_data, "❌ Usage: ClearEdges OX"
-    obj = args[0]
-    before = len(global_data)
-    mask = global_data["Permission"].apply(lambda x: isinstance(x, str) and x.strip().upper() in ("R","W"))
-    global_data = global_data[~(mask & ((global_data["Target"] == obj) | (global_data["Source"] == obj)))]
-    deleted = before - len(global_data)
-    return global_data, f"🧹 {deleted} arête(s) R/W supprimée(s) autour de '{obj}'."
-
 
     # ---------- CHINA-WALL ----------
     if command == "Never":
