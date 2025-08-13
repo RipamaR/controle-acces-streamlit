@@ -77,8 +77,7 @@ def tarjan(V, adj):
 def propagate_labels(components, adj, component_map):
     labels = {frozenset(comp): set(comp) for comp in components}
     def dfs(node, visited):
-        if node in visited:
-            return
+        if node in visited: return
         visited.add(node)
         for neighbor in adj.get(node, []):
             if neighbor in component_map:
@@ -116,25 +115,25 @@ def apply_permissions(df: pd.DataFrame):
     Adjacence à partir des permissions :
     - R : Target -> Source  (X lit Y => Y->X)
     - W : Source -> Target  (X écrit Y => X->Y)
+    (Owner est ignoré dans le graphe)
     """
     adj = {}
     def add_edge(a, b):
-        if pd.isna(a) or pd.isna(b):
-            return
+        if pd.isna(a) or pd.isna(b): return
         adj.setdefault(a, [])
         adj.setdefault(b, [])
         adj[a].append(b)
 
     for _, row in df.iterrows():
         s, p, t = row.get("Source"), row.get("Permission"), row.get("Target")
-        if pd.isna(p) or pd.isna(t):
+        if pd.isna(p) or pd.isna(t):  # pas de permission => rien
             continue
         for perm in str(p).split(","):
             perm = perm.strip()
             if perm == "R":
-                add_edge(t, s)
+                add_edge(t, s)  # Y -> X
             elif perm == "W":
-                add_edge(s, t)
+                add_edge(s, t)  # X -> Y
 
     for k in list(adj.keys()):
         adj[k] = list(sorted(set(adj[k])))
@@ -144,65 +143,61 @@ def apply_permissions(df: pd.DataFrame):
 def display_entities_table(components, labels):
     data = {
         "Entities": [", ".join(sorted(c)) for c in components],
-        "Their labels": [
-            "{" + ", ".join(sorted(lbl | set(comp))) + "}"
-            for comp, lbl in zip(components, labels)
-        ],
+        "Their labels": ["{" + ", ".join(sorted(lbl | set(comp))) + "}" for comp, lbl in zip(components, labels)],
     }
     df = pd.DataFrame(data)
     st.markdown("### Table des entités et étiquettes")
     st.dataframe(df, use_container_width=True)
 
 def display_role_table_streamlit(df: pd.DataFrame):
-    if "Role" not in df.columns:
-        return
+    if "Role" not in df.columns: return
     roles = sorted({r for r in df["Role"].dropna().unique() if str(r).strip()})
     objects = sorted({t for t in df["Target"].dropna().unique() if str(t).strip()})
-    if not roles or not objects:
-        return
+    if not roles or not objects: return
     role_perms_map = {r: {o: "" for o in objects} for r in roles}
     for _, row in df.iterrows():
-        role = row.get("Role")
-        obj = row.get("Target")
-        perm = row.get("Permission")
+        role, obj, perm = row.get("Role"), row.get("Target"), row.get("Permission")
         if pd.notna(role) and pd.notna(obj) and pd.notna(perm):
             current = set(role_perms_map[role][obj].split(",")) if role_perms_map[role][obj] else set()
             for p in str(perm).split(","):
                 p = p.strip()
-                if p:
-                    current.add(p)
+                if p: current.add(p)
             role_perms_map[role][obj] = ",".join(sorted(current))
-    table = []
-    for r in roles:
-        row = {"Role": r}
-        for o in objects:
-            row[o] = role_perms_map[r][o]
-        table.append(row)
-    df_role = pd.DataFrame(table, columns=["Role"] + objects)
+    df_role = pd.DataFrame([{"Role": r, **role_perms_map[r]} for r in roles], columns=["Role"] + objects)
     st.markdown("### Table des rôles et permissions")
     st.dataframe(df_role, use_container_width=True)
 
 # =============== PYVIS (Streamlit) =========================
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
+
+    # ── IMPORTANT : on ne dessine QUE les nœuds impliqués dans R/W ──
+    nodes_with_edges = set(adj_1.keys())
+    for lst in adj_1.values():
+        nodes_with_edges.update(lst)
+
     net = Network(notebook=False, height='1000px', width='100%', directed=True, cdn_resources='in_line')
 
     sorted_components_1 = sorted(components_1, key=len, reverse=True)
     sorted_components_2 = sorted(components_2, key=len, reverse=True)
 
-    x_gap = 300
-    y_gap = 250
+    x_gap, y_gap = 300, 250
     current_y_subject = 0
     current_y_object = 0
     node_indices = {}
     G1 = nx.DiGraph()
 
-    role_to_subject = {subject: role_data.get(subject, "None") for subject in adj_1.keys()}
+    role_to_subject = {subject: role_data.get(subject, "None") for subject in nodes_with_edges}
 
     # colonne gauche : sujets ; colonne droite : objets
     for component, label in zip(sorted_components_1, labels_1):
-        subjects = [s for s in component if str(s).startswith("S")]
-        objects = [o for o in component if str(o).startswith("O")]
+        # on filtre le composant aux nœuds actifs
+        comp_active = [n for n in component if n in nodes_with_edges]
+        if not comp_active:
+            continue
+
+        subjects = [s for s in comp_active if str(s).startswith("S")]
+        objects  = [o for o in comp_active if str(o).startswith("O")]
 
         for subj in subjects:
             roles = role_to_subject.get(subj, "None")
@@ -218,6 +213,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
             node_indices[obj] = obj
             current_y_object += 1
 
+    # Arêtes (uniquement sur le graphe R/W)
     for src, dest_list in adj_1.items():
         for dest in dest_list:
             if src in node_indices and dest in node_indices:
@@ -229,30 +225,38 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     for src, dest in G1.edges():
         net.add_edge(src, dest, arrows="to")
 
+    # Boîtes classes d'équivalence (sur nœuds actifs uniquement)
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
 
+    idx_map = []
     for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
-        entity_name = ', '.join(component)
-        combined_labels = '{' + ', '.join(sorted(label | set(component))) + '}'
+        comp_active = [n for n in component if n in nodes_with_edges]
+        if not comp_active:
+            idx_map.append(None)
+            continue
+        entity_name = ', '.join(comp_active)
+        combined_labels = '{' + ', '.join(sorted((label | set(comp_active)))) + '}'
         text = f'| {entity_name}: {combined_labels} |'
         col_index = i % 3
         row_index = i // 3
         x, y = positions[col_index]
         y += row_index * offset_y
         net.add_node(base_idx + i, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
+        idx_map.append(base_idx + i)
 
     def find_idx(target_set):
+        # retourne l'index visuel seulement si ce set contient au moins un nœud actif
         for i, lbl in enumerate(labels_2):
             if lbl == target_set:
-                return i
+                return idx_map[i]
         return None
 
     for src_set, dst_set in simplified_edges_2:
         si, di = find_idx(src_set), find_idx(dst_set)
         if si is not None and di is not None:
-            net.add_edge(base_idx + si, base_idx + di, arrows="to")
+            net.add_edge(si, di, arrows="to")
 
     net.set_options("""
     var options = {
@@ -267,13 +271,10 @@ def draw_combined_graph(components_1, adj_1, labels_1,
 # =============== RBAC : propagation depuis Excel ===========
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    if "Role" not in df.columns:
-        df["Role"] = None
-    if "Heritage" not in df.columns:
-        df["Heritage"] = None
+    if "Role" not in df.columns: df["Role"] = None
+    if "Heritage" not in df.columns: df["Heritage"] = None
 
-    role_perms = {}
-    subject_roles = {}
+    role_perms, subject_roles = {}, {}
     for _, row in df.iterrows():
         role = str(row.get("Role", "")).strip()
         subj = str(row.get("Source", "")).strip()
@@ -286,15 +287,12 @@ def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
 
     new_rows = []
     for subj, roles in subject_roles.items():
-        if not subj:
-            continue
+        if not subj: continue
         for r in roles:
             for perm, obj in role_perms.get(r, set()):
                 mask = ((df["Source"] == subj) & (df["Permission"] == perm) & (df["Target"] == obj))
                 if not mask.any():
-                    new_rows.append({
-                        "Source": subj, "Permission": perm, "Target": obj, "Role": r, "Heritage": "Role"
-                    })
+                    new_rows.append({"Source": subj, "Permission": perm, "Target": obj, "Role": r, "Heritage": "Role"})
     if new_rows:
         df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     return df
@@ -364,8 +362,7 @@ def process_data_display(df: pd.DataFrame):
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
     def ensure_cols(df):
         for c in ["Source", "Permission", "Target", "Role", "Heritage"]:
-            if c not in df.columns:
-                df[c] = None
+            if c not in df.columns: df[c] = None
         return df
 
     def ok(x): return x
@@ -379,7 +376,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     cmd, args = parts[0], parts[1:]
     out = [f"💬 Command executed: C:\\> {' '.join(parts)}"]
 
-    # Reset (utile pour les tests)
+    # Reset
     if cmd == "Reset":
         st.session_state.global_data = pd.DataFrame(columns=["Source","Permission","Target","Role","Heritage"])
         st.session_state.roles_definis.clear()
@@ -391,7 +388,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         st.session_state.interdictions_entites.clear()
         return st.session_state.global_data, "\n".join(out + [ok("✅ Reset done.")])
 
-    # --- RBAC simple : déclarer un objet sans propriétaire
+    # RBAC: simple AddObj (sans propriétaire)
     if cmd == "AddObj" and len(args) == 1:
         obj = args[0]
         if obj in st.session_state.objets_definis:
@@ -400,7 +397,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         df = pd.concat([df, pd.DataFrame([{"Source": None, "Permission": None, "Target": obj, "Role": None, "Heritage": None}])], ignore_index=True)
         return df, "\n".join(out + [ok(f"✅ Object '{obj}' created.")])
 
-    # --- RBAC : rôles / sujets / permissions
+    # RBAC: rôles / sujets / permissions
     if cmd == "AddRole":
         if len(args) != 1:
             return df, "\n".join(out + ["❌ Usage: AddRole R1"])
@@ -425,7 +422,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         if role:
             st.session_state.subject_roles[subject].add(role)
         df = pd.concat([df, pd.DataFrame([{"Source": subject, "Permission": None, "Target": None, "Role": role, "Heritage": None}])], ignore_index=True)
-        # héritage immédiat
         if role:
             for (perm, obj) in st.session_state.role_permissions.get(role, set()):
                 mask = (df["Source"] == subject) & (df["Permission"] == perm) & (df["Target"] == obj) & (df["Role"] == role)
@@ -449,7 +445,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
                     df = pd.concat([df, pd.DataFrame([{"Source": subj, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"}])], ignore_index=True)
         return df, "\n".join(out + [ok(f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated.")])
 
-    # --- DAC : création d'objet avec propriétaire (Owner) – PAS de lecture auto
+    # DAC: création d'objet avec propriétaire (Owner) – PAS de lecture auto
     if len(parts) >= 3 and parts[1] == "AddObj":
         owner, obj = parts[0], parts[2]
         if owner not in st.session_state.sujets_definis:
@@ -459,11 +455,11 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         st.session_state.objets_definis.add(obj)
         entry_owner = {"Source": owner, "Permission": "Owner", "Target": obj, "Role": None, "Heritage": None}
         df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
-        # sécurité : retirer toute éventuelle lecture résiduelle vers owner
+        # sécurité : aucune lecture implicite du propriétaire
         df = df[~((df["Source"] == owner) & (df["Target"] == obj) & (df["Permission"] == "R"))]
         return df, "\n".join(out + [ok(f"✅ Object '{obj}' created with owner '{owner}' (no read right).")])
 
-    # --- DAC : Grant (seul le propriétaire peut accorder)
+    # DAC: Grant (seul le propriétaire peut accorder)
     if len(parts) >= 5 and parts[1] == "Grant":
         owner, _, subject, obj, perm = parts[:5]
         if owner not in st.session_state.sujets_definis:
@@ -479,7 +475,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         df = pd.concat([df, pd.DataFrame([new_entry], columns=df.columns)], ignore_index=True)
         return df, "\n".join(out + [ok(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")])
 
-    # --- China-Wall
+    # China-Wall
     if cmd == "Never":
         if "for" in args:
             i = args.index("for")
@@ -494,7 +490,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
             return df, "\n".join(out + [ok(f"🚧 Globally forbidden combination: {etiquettes}")])
 
     if cmd == "AddCh":
-        # AddCh E1 E2  |  AddCh S1 R O1 [Role]
         if len(args) == 2:
             source, target = args
             temp = pd.concat([df, pd.DataFrame([{"Source": source, "Permission": "R", "Target": target, "Role": None, "Heritage": None}])], ignore_index=True)
@@ -505,11 +500,11 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         else:
             return df, "\n".join(out + ["❌ Usage: AddCh E1 E2  |  AddCh S1 R O1 [Role]"])
 
+        # vérif China-Wall
         adj = apply_permissions(temp)
         V = sorted(set(adj.keys()) | {v for lst in adj.values() for v in lst})
         scc, cmap = tarjan(V, adj)
         labels = propagate_labels(scc, adj, cmap)
-
         for comp in labels:
             for interdit in st.session_state.interdictions_globales:
                 if set(interdit).issubset(comp):
@@ -559,7 +554,7 @@ def _run_command_callback():
     st.session_state.global_data, message = apply_prompt(st.session_state.global_data, cmd)
     st.session_state.history.append(f"C:\\> {cmd}\n{message}")
     st.session_state.cmd_input = ""
-    st.rerun()  # régénère tout (graphiques inclus)
+    st.rerun()  # régénère tout (graphes inclus)
 
 def main():
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
@@ -584,10 +579,8 @@ def main():
                     missing = required - set(df.columns)
                     if missing:
                         raise ValueError(f"Colonnes manquantes: {missing}")
-                    if "Role" not in df.columns:
-                        df["Role"] = None
-                    if "Heritage" not in df.columns:
-                        df["Heritage"] = None
+                    if "Role" not in df.columns: df["Role"] = None
+                    if "Heritage" not in df.columns: df["Heritage"] = None
                 st.session_state.global_data = df
                 st.success("✅ Fichier chargé.")
                 with st.expander("Voir les données chargées"):
