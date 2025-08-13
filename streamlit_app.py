@@ -460,7 +460,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         entry_owner = {"Source": owner, "Permission": "Owner", "Target": obj, "Role": None, "Heritage": None}
         df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
         # aucune lecture implicite du propriétaire
-        df = df[~((df["Source"] == owner) & (df["Target"] == obj) & (df["Permission"] == "R"))]
+        
         return df, "\n".join(out + [ok(f"✅ Object '{obj}' created with owner '{owner}' (no read right).")])
 
     # DAC: Grant (seul le propriétaire peut accorder)
