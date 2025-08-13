@@ -97,7 +97,6 @@ def simplify_relations(labels):
         for j, s2 in enumerate(labels):
             if i != j and s1.issubset(s2):
                 reduced.add_edge(i, j)
-    # suppression des arêtes transitives
     transitive_edges = set()
     for i in range(len(labels)):
         for j in range(len(labels)):
@@ -115,7 +114,7 @@ def apply_permissions(df: pd.DataFrame):
     Adjacence à partir des permissions :
     - R : Target -> Source  (X lit Y => Y->X)
     - W : Source -> Target  (X écrit Y => X->Y)
-    (Owner est ignoré dans le graphe)
+    (Owner/None ignorés)
     """
     adj = {}
     def add_edge(a, b):
@@ -171,7 +170,7 @@ def display_role_table_streamlit(df: pd.DataFrame):
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
 
-    # ── IMPORTANT : on ne dessine QUE les nœuds impliqués dans R/W ──
+    # ── on ne dessine QUE les nœuds impliqués dans R/W ──
     nodes_with_edges = set(adj_1.keys())
     for lst in adj_1.values():
         nodes_with_edges.update(lst)
@@ -183,19 +182,17 @@ def draw_combined_graph(components_1, adj_1, labels_1,
 
     x_gap, y_gap = 300, 250
     current_y_subject = 0
-    current_y_object = 0
+    current_y_object  = 0
     node_indices = {}
     G1 = nx.DiGraph()
 
     role_to_subject = {subject: role_data.get(subject, "None") for subject in nodes_with_edges}
 
-    # colonne gauche : sujets ; colonne droite : objets
+    # sujets à gauche / objets à droite
     for component, label in zip(sorted_components_1, labels_1):
-        # on filtre le composant aux nœuds actifs
         comp_active = [n for n in component if n in nodes_with_edges]
         if not comp_active:
             continue
-
         subjects = [s for s in comp_active if str(s).startswith("S")]
         objects  = [o for o in comp_active if str(o).startswith("O")]
 
@@ -213,7 +210,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
             node_indices[obj] = obj
             current_y_object += 1
 
-    # Arêtes (uniquement sur le graphe R/W)
+    # Arêtes (uniquement R/W)
     for src, dest_list in adj_1.items():
         for dest in dest_list:
             if src in node_indices and dest in node_indices:
@@ -229,8 +226,8 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
-
     idx_map = []
+
     for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
         comp_active = [n for n in component if n in nodes_with_edges]
         if not comp_active:
@@ -247,7 +244,6 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         idx_map.append(base_idx + i)
 
     def find_idx(target_set):
-        # retourne l'index visuel seulement si ce set contient au moins un nœud actif
         for i, lbl in enumerate(labels_2):
             if lbl == target_set:
                 return idx_map[i]
@@ -333,17 +329,25 @@ def process_data_display(df: pd.DataFrame):
         st.info("Aucune donnée à afficher.")
         return
 
+    # 1) propagation RBAC (héritage)
     df_expanded = propagate_rbac_from_excel(df)
-    adj = apply_permissions(df_expanded)
+
+    # 2) ❗️ On ne garde pour les graphes que R/W (pas Owner, pas None)
+    df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
+
+    # 3) Adjacence + SCC/labels sur df_effective uniquement
+    adj = apply_permissions(df_effective)
     V = sorted(set(adj.keys()) | {v for lst in adj.values() for v in lst})
     scc, cmap = tarjan(V, adj)
     labels = propagate_labels(scc, adj, cmap)
 
+    # 4) China-Wall
     violated, msg = violates_china_wall(labels)
     if violated:
         st.error(f"⛔ CHINA-WALL: {msg}")
         return
 
+    # 5) Tables + Graphes
     col1, col2 = st.columns([1, 1], gap="large")
     with col1:
         display_entities_table(scc, labels)
@@ -455,7 +459,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         st.session_state.objets_definis.add(obj)
         entry_owner = {"Source": owner, "Permission": "Owner", "Target": obj, "Role": None, "Heritage": None}
         df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
-        # sécurité : aucune lecture implicite du propriétaire
+        # aucune lecture implicite du propriétaire
         df = df[~((df["Source"] == owner) & (df["Target"] == obj) & (df["Permission"] == "R"))]
         return df, "\n".join(out + [ok(f"✅ Object '{obj}' created with owner '{owner}' (no read right).")])
 
@@ -501,7 +505,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
             return df, "\n".join(out + ["❌ Usage: AddCh E1 E2  |  AddCh S1 R O1 [Role]"])
 
         # vérif China-Wall
-        adj = apply_permissions(temp)
+        adj = apply_permissions(temp[temp["Permission"].isin(["R", "W"])])
         V = sorted(set(adj.keys()) | {v for lst in adj.values() for v in lst})
         scc, cmap = tarjan(V, adj)
         labels = propagate_labels(scc, adj, cmap)
