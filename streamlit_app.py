@@ -458,17 +458,31 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         return df, "\n".join(out + [f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated."])
 
     # ---- DAC
-    # S2 AddObj O2  => crée un objet O2 dont S2 est propriétaire (Owner), PAS de lecture par défaut
-    if len(parts) >= 3 and parts[1] == "AddObj":
-        owner, obj = parts[0], parts[2]
-        if owner not in st.session_state.sujets_definis:
-            return df, "\n".join(out + [f"⛔ Error: Subject '{owner}' does not exist. Use AddSub first."])
-        if obj in st.session_state.objets_definis:
-            return df, "\n".join(out + [f"ℹ️ The object '{obj}' already exists."])
-        st.session_state.objets_definis.add(obj)
-        entry_owner = {"Source": owner, "Permission": "Owner", "Target": obj, "Role": None, "Heritage": None}
-        df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
-        return df, "\n".join(out + [f"✅ Object '{obj}' created with owner '{owner}'"])
+   # S2 AddObj O2  => objet O2 avec propriétaire S2 (Owner), PAS de lecture auto
+if len(parts) >= 3 and parts[1] == "AddObj":
+    owner, obj = parts[0], parts[2]
+    if owner not in st.session_state.sujets_definis:
+        return df, "\n".join(out_msgs + [msg_err(f"⛔ Error: Subject '{owner}' does not exist. Use AddSub first.")])
+    if obj in st.session_state.objets_definis:
+        return df, "\n".join(out_msgs + [msg_ok(f"ℹ️ The object '{obj}' already exists.")])
+
+    st.session_state.objets_definis.add(obj)
+
+    # 1) ajoute uniquement la propriété (Owner)
+    entry_owner = {
+        "Source": owner, "Target": obj, "Permission": "Owner", "Role": None, "Heritage": None
+    }
+    df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
+
+    # 2) par sécurité, supprime toute lecture 'R' vers le propriétaire si elle traîne déjà
+    df = df[~(
+        (df["Source"] == owner) &
+        (df["Target"] == obj) &
+        (df["Permission"] == "R")
+    )]
+
+    return df, "\n".join(out_msgs + [msg_ok(f"✅ Object '{obj}' created with owner '{owner}' (no read right).")])
+
 
     # S2 Grant S3 O2 R  => seul le propriétaire peut accorder
     if len(parts) >= 5 and parts[1] == "Grant":
