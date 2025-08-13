@@ -608,6 +608,27 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         new_entry = {"Source": subject, "Permission": perm, "Target": obj, "Role": None, "Heritage": None}
         df = pd.concat([df, pd.DataFrame([new_entry], columns=df.columns)], ignore_index=True)
         return _normalize_df(df), "\n".join(out_msgs + [f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'."])
+    if command == "ListEdges":
+    # Affiche toutes les arêtes R/W réellement utilisées pour le graphe
+    dfe = global_data[global_data["Permission"]
+                      .apply(lambda x: isinstance(x, str) and x.strip().upper() in ("R", "W"))]
+    if dfe.empty:
+        return global_data, "ℹ️ Aucune arête R/W."
+    edges = sorted({f"{t.strip()} -> {s.strip()} ({p.strip().upper()})"
+                    for s,p,t in dfe[["Source","Permission","Target"]].itertuples(index=False) if s and t})
+    return global_data, "🔎 Arêtes utilisées:\n- " + "\n- ".join(edges)
+
+if command == "ClearEdges":
+    # ClearEdges O2  -> supprime toutes les R/W liées à O2 (utile si du bruit traîne)
+    if len(args) != 1:
+        return global_data, "❌ Usage: ClearEdges OX"
+    obj = args[0]
+    before = len(global_data)
+    mask = global_data["Permission"].apply(lambda x: isinstance(x, str) and x.strip().upper() in ("R","W"))
+    global_data = global_data[~(mask & ((global_data["Target"] == obj) | (global_data["Source"] == obj)))]
+    deleted = before - len(global_data)
+    return global_data, f"🧹 {deleted} arête(s) R/W supprimée(s) autour de '{obj}'."
+
 
     # ---------- CHINA-WALL ----------
     if command == "Never":
