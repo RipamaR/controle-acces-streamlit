@@ -166,7 +166,9 @@ def display_role_table_streamlit(df: pd.DataFrame):
     st.dataframe(df_role, use_container_width=True)
 
 # =============== PYVIS (Streamlit) =========================
-def draw_combined_graph(components_1, adj_1, labels_1,components_2, labels_2, simplified_edges_2, role_data):
+def draw_combined_graph(components_1, adj_1, labels_1,
+                        components_2, labels_2, simplified_edges_2, role_data,
+                        active_nodes=None):
     """
     Affiche uniquement les sujets/objets impliqués dans des arêtes R/W.
     Donc un propriétaire (Owner) *seul* n'apparaît pas tant qu'il n'a pas une lecture/écriture explicite.
@@ -243,7 +245,8 @@ def draw_combined_graph(components_1, adj_1, labels_1,components_2, labels_2, si
 
     for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
         # n'afficher la boîte que si la compo contient au moins un nœud autorisé
-        if not comp_has_allowed(component):
+        def _has_allowed(cc): return any((n in allowed_subjects or n in allowed_objects) for n in cc)
+        if not _has_allowed(component):
             continue
         entity_name = ', '.join(component)
         combined_labels = '{' + ', '.join(sorted(label | set(component))) + '}'
@@ -252,7 +255,8 @@ def draw_combined_graph(components_1, adj_1, labels_1,components_2, labels_2, si
         row_index = i // 3
         x, y = positions[col_index]
         y += row_index * offset_y
-        net.add_node(base_idx + i, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
+        net.add_node(base_idx + i, label=text, shape='box', x=x, y=y,
+                     width_constraint=300, height_constraint=100)
 
     # Raccourcis pour retrouver les indices des labels 2
     def find_idx_by_labelset(target_set):
@@ -278,11 +282,6 @@ def draw_combined_graph(components_1, adj_1, labels_1,components_2, labels_2, si
 
     html_str = net.generate_html()
     st_html(html_str, height=1000, width=1800, scrolling=True)
-
-
-
-
-
 
 # =============== RBAC : propagation depuis Excel ===========
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
@@ -385,7 +384,7 @@ def process_data_display(df: pd.DataFrame):
         scc, adj, labels,
         scc, labels, simplified,
         role_data=role_map,
-        active_nodes=active_nodes,  # <-- passé au renderer
+        active_nodes=active_nodes,  # optionnel
     )
 
 # =============== TERMINAL : COMMANDES ======================
@@ -418,7 +417,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
             if total == 0:
                 out_msgs.append("⚠️ No entities defined. Please create subjects or objects first.")
                 return df, "\n".join(out_msgs)
-            evaluer_performance_interface(total)
+            # evaluer_performance_interface(total)  # (optionnel si tu as cette fonction)
             out_msgs.append("✅ Performance chart generated.")
             return df, "\n".join(out_msgs)
         except Exception as e:
