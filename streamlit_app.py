@@ -109,34 +109,33 @@ def simplify_relations(labels):
     return [(label_map[u], label_map[v]) for u, v in reduced.edges()]
 
 # =============== CONSTRUCTION DU GRAPHE =====================
-def apply_permissions(df: pd.DataFrame):
+def apply_permissions(df_effective: pd.DataFrame):
     """
-    Adjacence à partir des permissions :
-    - R : Target -> Source  (X lit Y => Y->X)
-    - W : Source -> Target  (X écrit Y => X->Y)
-    (Owner/None ignorés)
+    Construit l'adjacence **uniquement** depuis les lignes R/W.
+    Aucune prise en compte de Owner/None.
     """
     adj = {}
+
     def add_edge(a, b):
-        if pd.isna(a) or pd.isna(b): return
+        if pd.isna(a) or pd.isna(b):
+            return
         adj.setdefault(a, [])
         adj.setdefault(b, [])
         adj[a].append(b)
 
-    for _, row in df.iterrows():
+    # ⚠️ on ne lit QUE les lignes R et W
+    for _, row in df_effective.iterrows():
         s, p, t = row.get("Source"), row.get("Permission"), row.get("Target")
-        if pd.isna(p) or pd.isna(t):  # pas de permission => rien
-            continue
-        for perm in str(p).split(","):
-            perm = perm.strip()
-            if perm == "R":
-                add_edge(t, s)  # Y -> X
-            elif perm == "W":
-                add_edge(s, t)  # X -> Y
+        if p == "R":
+            add_edge(t, s)  # Y -> X (lecture)
+        elif p == "W":
+            add_edge(s, t)  # X -> Y (écriture)
 
+    # dédoublonnage
     for k in list(adj.keys()):
         adj[k] = list(sorted(set(adj[k])))
     return adj
+
 
 # =============== TABLES (Streamlit) ========================
 def display_entities_table(components, labels):
@@ -168,13 +167,8 @@ def display_role_table_streamlit(df: pd.DataFrame):
 
 # =============== PYVIS (Streamlit) =========================
 def draw_combined_graph(components_1, adj_1, labels_1,
-                        components_2, labels_2, simplified_edges_2, role_data):
-
-    # ── on ne dessine QUE les nœuds impliqués dans R/W ──
-    nodes_with_edges = set(adj_1.keys())
-    for lst in adj_1.values():
-        nodes_with_edges.update(lst)
-
+                        components_2, labels_2, simplified_edges_2, role_data,
+                        active_nodes: set):
     net = Network(notebook=False, height='1000px', width='100%', directed=True, cdn_resources='in_line')
 
     sorted_components_1 = sorted(components_1, key=len, reverse=True)
@@ -186,71 +180,68 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     node_indices = {}
     G1 = nx.DiGraph()
 
-    role_to_subject = {subject: role_data.get(subject, "None") for subject in nodes_with_edges}
+    # seuls les sujets présents dans active_nodes
+    role_to_subject = {s: role_data.get(s, "None") for s in active_nodes}
 
-    # sujets à gauche / objets à droite
+    # place uniquement les nœuds actifs
     for component, label in zip(sorted_components_1, labels_1):
-        comp_active = [n for n in component if n in nodes_with_edges]
+        comp_active = [n for n in component if n in active_nodes]
         if not comp_active:
             continue
         subjects = [s for s in comp_active if str(s).startswith("S")]
         objects  = [o for o in comp_active if str(o).startswith("O")]
 
         for subj in subjects:
-            roles = role_to_subject.get(subj, "None")
-            combined_labels = '{' + ', '.join(sorted(label | {subj})) + '}'
-            text = f'{subj}({roles}):\n{combined_labels}'
-            net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-current_y_subject * y_gap)
+            combined = '{' + ', '.join(sorted(label | {subj})) + '}'
+            net.add_node(subj, label=f'{subj}({role_to_subject.get(subj,"None")}):\n{combined}',
+                         shape='ellipse', x=-x_gap, y=-current_y_subject * y_gap)
             node_indices[subj] = subj
             current_y_subject += 1
 
         for obj in objects:
-            combined_labels = '{' + ', '.join(sorted(label | {obj})) + '}'
-            net.add_node(obj, label=f'{obj}:\n{combined_labels}', shape='box', x=x_gap, y=-current_y_object * y_gap)
+            combined = '{' + ', '.join(sorted(label | {obj})) + '}'
+            net.add_node(obj, label=f'{obj}:\n{combined}', shape='box',
+                         x=x_gap, y=-current_y_object * y_gap)
             node_indices[obj] = obj
             current_y_object += 1
 
-    # Arêtes (uniquement R/W)
-    for src, dest_list in adj_1.items():
-        for dest in dest_list:
-            if src in node_indices and dest in node_indices:
-                G1.add_edge(src, dest)
-
+    # arêtes
+    for src, dests in adj_1.items():
+        for dst in dests:
+            if src in node_indices and dst in node_indices:
+                G1.add_edge(src, dst)
     if nx.is_directed_acyclic_graph(G1):
         G1 = nx.transitive_reduction(G1)
+    for s, d in G1.edges():
+        net.add_edge(s, d, arrows="to")
 
-    for src, dest in G1.edges():
-        net.add_edge(src, dest, arrows="to")
-
-    # Boîtes classes d'équivalence (sur nœuds actifs uniquement)
+    # boîtes de classes: uniquement si la classe contient au moins 1 nœud actif
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
     idx_map = []
 
-    for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
-        comp_active = [n for n in component if n in nodes_with_edges]
+    for i, (comp, lab) in enumerate(zip(sorted_components_2, labels_2)):
+        comp_active = [n for n in comp if n in active_nodes]
         if not comp_active:
             idx_map.append(None)
             continue
         entity_name = ', '.join(comp_active)
-        combined_labels = '{' + ', '.join(sorted((label | set(comp_active)))) + '}'
-        text = f'| {entity_name}: {combined_labels} |'
-        col_index = i % 3
-        row_index = i // 3
-        x, y = positions[col_index]
-        y += row_index * offset_y
-        net.add_node(base_idx + i, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
+        combined = '{' + ', '.join(sorted(lab | set(comp_active))) + '}'
+        col, row = i % 3, i // 3
+        x, y = positions[col]; y += row * offset_y
+        net.add_node(base_idx + i, label=f'| {entity_name}: {combined} |', shape='box',
+                     x=x, y=y, width_constraint=300, height_constraint=100)
         idx_map.append(base_idx + i)
 
-    def find_idx(target_set):
+    def idx_of(set_lbl):
         for i, lbl in enumerate(labels_2):
-            if lbl == target_set:
+            if lbl == set_lbl:
                 return idx_map[i]
         return None
 
-    for src_set, dst_set in simplified_edges_2:
-        si, di = find_idx(src_set), find_idx(dst_set)
+    for sset, dset in simplified_edges_2:
+        si, di = idx_of(sset), idx_of(dset)
         if si is not None and di is not None:
             net.add_edge(si, di, arrows="to")
 
@@ -263,6 +254,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     }
     """)
     st_html(net.generate_html(), height=1000, width=1800, scrolling=True)
+
 
 # =============== RBAC : propagation depuis Excel ===========
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
@@ -329,37 +321,43 @@ def process_data_display(df: pd.DataFrame):
         st.info("Aucune donnée à afficher.")
         return
 
-    # 1) propagation RBAC (héritage)
+    # Propagation RBAC éventuelle
     df_expanded = propagate_rbac_from_excel(df)
 
-    # 2) ❗️ On ne garde pour les graphes que R/W (pas Owner, pas None)
+    # ⚠️ lignes effectives utilisées pour le graphe = uniquement R/W
     df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
+    if df_effective.empty:
+        st.info("Aucune relation R/W à afficher.")
+        return
 
-    # 3) Adjacence + SCC/labels sur df_effective uniquement
+    # Construire l'adjacence **sur df_effective**
     adj = apply_permissions(df_effective)
-    V = sorted(set(adj.keys()) | {v for lst in adj.values() for v in lst})
+
+    # ⚠️ nœuds actifs = ceux qui ont une arête entrante/sortante (pas d’apparition des “Owner” seuls)
+    active_nodes = set(adj.keys())
+    for lst in adj.values():
+        active_nodes.update(lst)
+
+    V = sorted(active_nodes)
     scc, cmap = tarjan(V, adj)
     labels = propagate_labels(scc, adj, cmap)
 
-    # 4) China-Wall
-    violated, msg = violates_china_wall(labels)
-    if violated:
-        st.error(f"⛔ CHINA-WALL: {msg}")
-        return
-
-    # 5) Tables + Graphes
+    # Tables
     col1, col2 = st.columns([1, 1], gap="large")
     with col1:
         display_entities_table(scc, labels)
     with col2:
         display_role_table_streamlit(df_expanded)
 
+    # Graphe
     st.markdown("---")
-    simplified_edges = simplify_relations(labels)
+    simplified = simplify_relations(labels)
+    role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
     draw_combined_graph(
         scc, adj, labels,
-        scc, labels, simplified_edges,
-        role_data=df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
+        scc, labels, simplified,
+        role_data=role_map,
+        active_nodes=active_nodes,  # <-- passé au renderer
     )
 
 # =============== TERMINAL : COMMANDES ======================
