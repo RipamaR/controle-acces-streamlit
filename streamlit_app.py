@@ -166,8 +166,7 @@ def display_role_table_streamlit(df: pd.DataFrame):
     st.dataframe(df_role, use_container_width=True)
 
 # =============== PYVIS (Streamlit) =========================
-def draw_combined_graph(components_1, adj_1, labels_1,
-                        components_2, labels_2, simplified_edges_2, role_data):
+def draw_combined_graph(components_1, adj_1, labels_1,components_2, labels_2, simplified_edges_2, role_data):
     """
     Affiche uniquement les sujets/objets impliqués dans des arêtes R/W.
     Donc un propriétaire (Owner) *seul* n'apparaît pas tant qu'il n'a pas une lecture/écriture explicite.
