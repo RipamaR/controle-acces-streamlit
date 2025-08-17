@@ -369,198 +369,411 @@ def process_data_display(df: pd.DataFrame):
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
+    """Interprète une commande, met à jour le DF et renvoie (df, message)."""
+    # --- helpers ---
     def ensure_cols(df):
-        for c in ["Source", "Permission", "Target", "Role", "Heritage"]:
-            if c not in df.columns: df[c] = None
+        cols = ["Source", "Target", "Permission", "Role", "Heritage"]
+        for c in cols:
+            if c not in df.columns:
+                df[c] = None
         return df
 
-    def ok(x): return x
-    def err(x): return x
-
     df = ensure_cols(global_data.copy())
-    parts = prompt.strip().split()
-    if not parts:
+
+    line = (prompt or "").strip()
+    if not line:
         return df, "💬 Empty command"
 
-    cmd, args = parts[0], parts[1:]
-    out = [f"💬 Command executed: C:\\> {' '.join(parts)}"]
+    parts = line.split()
+    command, args = parts[0], parts[1:]
 
-    # Reset
-    if cmd == "Reset":
-        st.session_state.global_data = pd.DataFrame(columns=["Source","Permission","Target","Role","Heritage"])
-        st.session_state.roles_definis.clear()
-        st.session_state.role_permissions.clear()
-        st.session_state.subject_roles.clear()
-        st.session_state.sujets_definis.clear()
-        st.session_state.objets_definis.clear()
-        st.session_state.interdictions_globales.clear()
-        st.session_state.interdictions_entites.clear()
-        return st.session_state.global_data, "\n".join(out + [ok("✅ Reset done.")])
+    # Toujours initialiser le journal des messages ICI
+    out_msgs = [f"💬 Command executed: C:\\> {line}"]
 
-    # RBAC: simple AddObj (sans propriétaire)
-    if cmd == "AddObj" and len(args) == 1:
+    # ========== PERF ==========
+    if command == "EvalPerf":
+        try:
+            total = len(st.session_state.sujets_definis | st.session_state.objets_definis)
+            if total == 0:
+                out_msgs.append("⚠️ No entities defined. Please create subjects or objects first.")
+                return df, "\n".join(out_msgs)
+            evaluer_performance_interface(total)
+            out_msgs.append("✅ Performance chart generated.")
+            return df, "\n".join(out_msgs)
+        except Exception as e:
+            out_msgs.append(f"❌ Error EvalPerf: {e}")
+            return df, "\n".join(out_msgs)
+
+    # ========== RBAC ==========
+    if command == "AddObj" and len(args) == 1:
+        # RBAC: déclare un objet (sans propriétaire)
         obj = args[0]
         if obj in st.session_state.objets_definis:
-            return df, "\n".join(out + [ok(f"ℹ️ The object '{obj}' already exists.")])
+            out_msgs.append(f"ℹ️ The object '{obj}' already exists.")
+            return df, "\n".join(out_msgs)
         st.session_state.objets_definis.add(obj)
-        df = pd.concat([df, pd.DataFrame([{"Source": None, "Permission": None, "Target": obj, "Role": None, "Heritage": None}])], ignore_index=True)
-        return df, "\n".join(out + [ok(f"✅ Object '{obj}' created.")])
+        df = pd.concat([df, pd.DataFrame([{
+            "Source": None, "Target": obj, "Permission": None, "Role": None, "Heritage": None
+        }], columns=df.columns)], ignore_index=True)
+        out_msgs.append(f"✅ Object '{obj}' created.")
+        return df, "\n".join(out_msgs)
 
-    # RBAC: rôles / sujets / permissions
-    if cmd == "AddRole":
+    if command == "AddRole":
         if len(args) != 1:
-            return df, "\n".join(out + ["❌ Usage: AddRole R1"])
+            out_msgs.append("❌ Usage: AddRole R1")
+            return df, "\n".join(out_msgs)
         role = args[0]
         if role in st.session_state.roles_definis:
-            return df, "\n".join(out + [ok(f"ℹ️ Role '{role}' already exists.")])
+            out_msgs.append(f"ℹ️ Role '{role}' already exists.")
+            return df, "\n".join(out_msgs)
         st.session_state.roles_definis.add(role)
         st.session_state.role_permissions.setdefault(role, set())
-        return df, "\n".join(out + [ok(f"✅ Role '{role}' added.")])
+        out_msgs.append(f"✅ Role '{role}' added.")
+        return df, "\n".join(out_msgs)
 
-    if cmd == "AddSub":
+    if command == "AddSub":
         if len(args) < 1:
-            return df, "\n".join(out + ["❌ Usage: AddSub S1 [R1]"])
+            out_msgs.append("❌ Usage: AddSub S1 [R1]")
+            return df, "\n".join(out_msgs)
         subject = args[0]
         role = args[1] if len(args) > 1 else None
         if subject in st.session_state.sujets_definis:
-            return df, "\n".join(out + [ok(f"ℹ️ The Subject '{subject}' already exists.")])
+            out_msgs.append(f"ℹ️ The Subject '{subject}' already exists.")
+            return df, "\n".join(out_msgs)
         if role and role not in st.session_state.roles_definis:
-            return df, "\n".join(out + [err(f"⛔ Error: Role '{role}' does not exist.")])
+            out_msgs.append(f"⛔ Error: Role '{role}' does not exist.")
+            return df, "\n".join(out_msgs)
+
         st.session_state.sujets_definis.add(subject)
         st.session_state.subject_roles.setdefault(subject, set())
         if role:
             st.session_state.subject_roles[subject].add(role)
-        df = pd.concat([df, pd.DataFrame([{"Source": subject, "Permission": None, "Target": None, "Role": role, "Heritage": None}])], ignore_index=True)
+
+        df = pd.concat([df, pd.DataFrame([{
+            "Source": subject, "Target": None, "Permission": None, "Role": role, "Heritage": None
+        }], columns=df.columns)], ignore_index=True)
+
         if role:
+            # héritage immédiat des permissions du rôle
             for (perm, obj) in st.session_state.role_permissions.get(role, set()):
                 mask = (df["Source"] == subject) & (df["Permission"] == perm) & (df["Target"] == obj) & (df["Role"] == role)
                 if not mask.any():
-                    df = pd.concat([df, pd.DataFrame([{"Source": subject, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"}])], ignore_index=True)
-        return df, "\n".join(out + [ok(f"✅ Subject '{subject}' added" + (f" with role '{role}'" if role else ""))])
+                    df = pd.concat([df, pd.DataFrame([{
+                        "Source": subject, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"
+                    }], columns=df.columns)], ignore_index=True)
 
-    if cmd == "GrantPermission":
+        out_msgs.append(f"✅ Subject '{subject}' added" + (f" with role '{role}'" if role else ""))
+        return df, "\n".join(out_msgs)
+
+    if command == "GrantPermission":
         if len(args) != 3:
-            return df, "\n".join(out + ["❌ Usage: GrantPermission R1 R O1"])
+            out_msgs.append("❌ Usage: GrantPermission R1 R O1")
+            return df, "\n".join(out_msgs)
         role, perm, obj = args
         if role not in st.session_state.roles_definis:
-            return df, "\n".join(out + [err(f"❌ Role '{role}' is not defined.")])
+            out_msgs.append(f"❌ Role '{role}' is not defined.")
+            return df, "\n".join(out_msgs)
         if obj not in st.session_state.objets_definis:
-            return df, "\n".join(out + [err(f"❌ Object '{obj}' does not exist. Use AddObj first.")])
+            out_msgs.append(f"❌ Object '{obj}' does not exist. Use AddObj first.")
+            return df, "\n".join(out_msgs)
+
         st.session_state.role_permissions.setdefault(role, set()).add((perm, obj))
         for subj, roles in st.session_state.subject_roles.items():
             if role in roles:
                 mask = ((df["Source"] == subj) & (df["Permission"] == perm) & (df["Target"] == obj) & (df["Role"] == role))
                 if not mask.any():
-                    df = pd.concat([df, pd.DataFrame([{"Source": subj, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"}])], ignore_index=True)
-        return df, "\n".join(out + [ok(f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated.")])
+                    df = pd.concat([df, pd.DataFrame([{
+                        "Source": subj, "Permission": perm, "Target": obj, "Role": role, "Heritage": "Role"
+                    }], columns=df.columns)], ignore_index=True)
+        out_msgs.append(f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated.")
+        return df, "\n".join(out_msgs)
 
-    # DAC: création d'objet avec propriétaire (Owner) – PAS de lecture auto
-    # ========= DAC =========
-# S2 AddObj O2  => crée l'objet O2 avec propriétaire S2, SANS lecture auto
+    if command == "RevokePermission":
+        if len(args) != 3:
+            out_msgs.append("❌ Usage: RevokePermission R1 R O1")
+            return df, "\n".join(out_msgs)
+        role, perm, obj = args
+        if role not in st.session_state.roles_definis:
+            out_msgs.append(f"⛔ Error: Role '{role}' does not exist.")
+            return df, "\n".join(out_msgs)
+        if obj not in st.session_state.objets_definis:
+            out_msgs.append(f"⛔ Error: Object '{obj}' does not exist.")
+            return df, "\n".join(out_msgs)
+
+        st.session_state.role_permissions.setdefault(role, set()).discard((perm, obj))
+        before = len(df)
+        df = df[~((df["Permission"] == perm) & (df["Target"] == obj) & (df["Role"] == role))]
+        deleted = before - len(df)
+        out_msgs.append(f"🗑️ Permission '{perm}' on '{obj}' revoked from role '{role}' ({deleted} propagation(s) removed).")
+        return df, "\n".join(out_msgs)
+
+    if command == "DeassignUser":
+        if len(args) != 2:
+            out_msgs.append("❌ Usage: DeassignUser S1 R1")
+            return df, "\n".join(out_msgs)
+        subject, role = args
+        if subject not in st.session_state.sujets_definis:
+            out_msgs.append(f"⛔ Error: Subject '{subject}' does not exist.")
+            return df, "\n".join(out_msgs)
+        if role not in st.session_state.roles_definis:
+            out_msgs.append(f"⛔ Error: Role '{role}' does not exist.")
+            return df, "\n".join(out_msgs)
+        if role not in st.session_state.subject_roles.get(subject, set()):
+            out_msgs.append(f"ℹ️ Subject '{subject}' does not have role '{role}'.")
+            return df, "\n".join(out_msgs)
+
+        st.session_state.subject_roles[subject].remove(role)
+        before = len(df)
+        df = df[~((df["Source"] == subject) & (df["Role"] == role))]
+        deleted = before - len(df)
+        out_msgs.append(f"🗑️ Role '{role}' removed from subject '{subject}' ({deleted} propagated permission(s) removed).")
+        return df, "\n".join(out_msgs)
+
+    if command == "RemoveRole":
+        if len(args) != 1:
+            out_msgs.append("❌ Usage: RemoveRole R1")
+            return df, "\n".join(out_msgs)
+        role = args[0]
+        if role not in st.session_state.roles_definis:
+            out_msgs.append(f"⛔ Error: Role '{role}' does not exist.")
+            return df, "\n".join(out_msgs)
+        st.session_state.roles_definis.remove(role)
+        st.session_state.role_permissions.pop(role, None)
+        for s in list(st.session_state.subject_roles.keys()):
+            st.session_state.subject_roles[s].discard(role)
+        df = df[df["Role"] != role]
+        out_msgs.append(f"🗑️ Role '{role}' successfully deleted and its permissions removed.")
+        return df, "\n".join(out_msgs)
+
+    if command == "ModifyRole":
+        if len(args) != 2:
+            out_msgs.append("❌ Usage: ModifyRole OldRole NewRole")
+            return df, "\n".join(out_msgs)
+        old_role, new_role = args
+        if old_role not in st.session_state.roles_definis:
+            out_msgs.append(f"⛔ Error: Role '{old_role}' does not exist.")
+            return df, "\n".join(out_msgs)
+        if new_role in st.session_state.roles_definis:
+            out_msgs.append(f"⛔ Error: Role '{new_role}' already exists.")
+            return df, "\n".join(out_msgs)
+
+        st.session_state.roles_definis.remove(old_role)
+        st.session_state.roles_definis.add(new_role)
+        st.session_state.role_permissions[new_role] = st.session_state.role_permissions.pop(old_role, set())
+        for subj in st.session_state.subject_roles:
+            if old_role in st.session_state.subject_roles[subj]:
+                st.session_state.subject_roles[subj].remove(old_role)
+                st.session_state.subject_roles[subj].add(new_role)
+        df.loc[df["Role"] == old_role, "Role"] = new_role
+        out_msgs.append(f"✏️ Role renamed: '{old_role}' ➝ '{new_role}'")
+        return df, "\n".join(out_msgs)
+
+    if command == "ModifyPermission":
+        if len(args) != 4:
+            out_msgs.append("❌ Usage: ModifyPermission R1 OldPerm Target NewPerm")
+            return df, "\n".join(out_msgs)
+        role, old_perm, target, new_perm = args
+        if role not in st.session_state.roles_definis:
+            out_msgs.append(f"⛔ Error: Role '{role}' does not exist.")
+            return df, "\n".join(out_msgs)
+        if (old_perm, target) not in st.session_state.role_permissions.get(role, set()):
+            out_msgs.append(f"⚠️ Permission '{old_perm}' on '{target}' not found in role '{role}'.")
+            return df, "\n".join(out_msgs)
+
+        st.session_state.role_permissions[role].remove((old_perm, target))
+        st.session_state.role_permissions[role].add((new_perm, target))
+        mask = (df["Role"] == role) & (df["Permission"] == old_perm) & (df["Target"] == target)
+        count = df[mask].shape[0]
+        df.loc[mask, "Permission"] = new_perm
+        out_msgs.append(f"🔁 Permission modified: Role '{role}' – {old_perm} ➝ {new_perm} on '{target}' ({count} entries updated).")
+        return df, "\n".join(out_msgs)
+
+    # ========== DAC ==========
+    # S2 AddObj O2  => crée l'objet O2 avec propriétaire S2, **sans** lecture auto
     if len(parts) >= 3 and parts[1] == "AddObj":
         owner, obj = parts[0], parts[2]
+        if owner not in st.session_state.sujets_definis:
+            out_msgs.append(f"⛔ Error: Subject '{owner}' does not exist. Use AddSub first.")
+            return df, "\n".join(out_msgs)
+        if obj in st.session_state.objets_definis:
+            out_msgs.append(f"ℹ️ The object '{obj}' already exists.")
+            return df, "\n".join(out_msgs)
 
-    if owner not in st.session_state.sujets_definis:
-        return df, "\n".join(out_msgs + ["⛔ Error: Subject '{owner}' does not exist. Use AddSub first."])
-    if obj in st.session_state.objets_definis:
-        return df, "\n".join(out_msgs + [f"ℹ️ The object '{obj}' already exists."])
+        st.session_state.objets_definis.add(obj)
+        entry_owner = {"Source": owner, "Target": obj, "Permission": "Owner", "Role": None, "Heritage": None}
+        df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
+        out_msgs.append(f"✅ Object '{obj}' created with owner '{owner}'")
+        return df, "\n".join(out_msgs)
 
-    st.session_state.objets_definis.add(obj)
-
-    # IMPORTANT : on n'ajoute QUE 'Owner', pas de 'R'
-    entry_owner = {
-        "Source": owner, "Target": obj, "Permission": "Owner", "Role": None, "Heritage": None
-    }
-    df = pd.concat([df, pd.DataFrame([entry_owner], columns=df.columns)], ignore_index=True)
-
-    return df, "\n".join(out_msgs + [f"✅ Object '{obj}' created with owner '{owner}'"])
-
-    # DAC: Grant (seul le propriétaire peut accorder)
+    # S2 Grant S3 O2 R
     if len(parts) >= 5 and parts[1] == "Grant":
         owner, _, subject, obj, perm = parts[:5]
         if owner not in st.session_state.sujets_definis:
-            return df, "\n".join(out + [err(f"⛔ Error: Subject '{owner}' does not exist.")])
+            out_msgs.append(f"⛔ Error: Subject '{owner}' does not exist.")
+            return df, "\n".join(out_msgs)
         if subject not in st.session_state.sujets_definis:
-            return df, "\n".join(out + [err(f"⛔ Error: Target subject '{subject}' does not exist.")])
+            out_msgs.append(f"⛔ Error: Target subject '{subject}' does not exist.")
+            return df, "\n".join(out_msgs)
         if obj not in st.session_state.objets_definis:
-            return df, "\n".join(out + [err(f"⛔ Error: Object '{obj}' does not exist.")])
+            out_msgs.append(f"⛔ Error: Object '{obj}' does not exist.")
+            return df, "\n".join(out_msgs)
+
+        # Vérifier que 'owner' est bien propriétaire de 'obj'
         is_owner = ((df["Source"] == owner) & (df["Target"] == obj) & (df["Permission"] == "Owner")).any()
         if not is_owner:
-            return df, "\n".join(out + [err(f"⛔ Error: '{owner}' is not the owner of '{obj}'.")])
+            out_msgs.append(f"⛔ Error: '{owner}' is not the owner of '{obj}'.")
+            return df, "\n".join(out_msgs)
+
         new_entry = {"Source": subject, "Permission": perm, "Target": obj, "Role": None, "Heritage": None}
         df = pd.concat([df, pd.DataFrame([new_entry], columns=df.columns)], ignore_index=True)
-        return df, "\n".join(out + [ok(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")])
+        out_msgs.append(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")
+        return df, "\n".join(out_msgs)
 
-    # China-Wall
-    if cmd == "Never":
+    # ========== CHINA-WALL ==========
+    if command == "Never":
         if "for" in args:
-            i = args.index("for")
-            etiquettes = [e.strip("{} ,") for e in args[:i]]
-            entites = [e.strip("{} ,") for e in args[i+1:]]
+            idx = args.index("for")
+            etiquettes = [e.strip("{} ,") for e in args[:idx]]
+            entites = [e.strip("{} ,") for e in args[idx + 1:]]
             for ent in entites:
                 st.session_state.interdictions_entites.setdefault(ent, []).append(etiquettes)
-            return df, "\n".join(out + [ok(f"🚧 Forbidden combination {etiquettes} for entities: {entites}")])
-        else:
-            etiquettes = [e.strip("{} ,") for e in args]
-            st.session_state.interdictions_globales.append(etiquettes)
-            return df, "\n".join(out + [ok(f"🚧 Globally forbidden combination: {etiquettes}")])
+            out_msgs.append(f"🚧 Forbidden combination {etiquettes} for entities: {entites}")
+            return df, "\n".join(out_msgs)
+        etiquettes = [e.strip("{} ,") for e in args]
+        st.session_state.interdictions_globales.append(etiquettes)
+        out_msgs.append(f"🚧 Globally forbidden combination: {etiquettes}")
+        return df, "\n".join(out_msgs)
 
-    if cmd == "AddCh":
+    if command == "AddCh":
         if len(args) == 2:
             source, target = args
-            temp = pd.concat([df, pd.DataFrame([{"Source": source, "Permission": "R", "Target": target, "Role": None, "Heritage": None}])], ignore_index=True)
+            temp = pd.concat([df, pd.DataFrame([{
+                "Source": source, "Target": target, "Permission": "R", "Role": None, "Heritage": None
+            }], columns=df.columns)], ignore_index=True)
         elif len(args) >= 3:
             source, permission, target = args[:3]
             role = args[3] if len(args) > 3 else None
-            temp = pd.concat([df, pd.DataFrame([{"Source": source, "Permission": permission, "Target": target, "Role": role, "Heritage": None}])], ignore_index=True)
+            temp = pd.concat([df, pd.DataFrame([{
+                "Source": source, "Target": target, "Permission": permission, "Role": role, "Heritage": None
+            }], columns=df.columns)], ignore_index=True)
         else:
-            return df, "\n".join(out + ["❌ Usage: AddCh E1 E2  |  AddCh S1 R O1 [Role]"])
+            out_msgs.append("❌ Usage: AddCh E1 E2  |  AddCh S1 R O1 [Role]")
+            return df, "\n".join(out_msgs)
 
-        # vérif China-Wall
-        adj = apply_permissions(temp[temp["Permission"].isin(["R", "W"])])
+        # Vérif China-Wall
+        adj = apply_permissions(temp)
         V = sorted(set(adj.keys()) | {v for lst in adj.values() for v in lst})
         scc, cmap = tarjan(V, adj)
         labels = propagate_labels(scc, adj, cmap)
+
         for comp in labels:
             for interdit in st.session_state.interdictions_globales:
                 if set(interdit).issubset(comp):
-                    return df, "\n".join(out + [f"⛔ CHINA WALL ERROR: Global restriction violated for {interdit}"])
+                    out_msgs.append(f"⛔ CHINA WALL ERROR: Global restriction violated for {interdit}")
+                    return df, "\n".join(out_msgs)
             for ent, combos in st.session_state.interdictions_entites.items():
                 if ent in comp:
                     for interdit in combos:
                         if set(interdit).issubset(comp):
-                            return df, "\n".join(out + [f"⛔ CHINA WALL ERROR: Restriction violated for {ent}: {interdit}"])
+                            out_msgs.append(f"⛔ CHINA WALL ERROR: Restriction violated for {ent}: {interdit}")
+                            return df, "\n".join(out_msgs)
+
         df = temp
         if len(args) == 2:
-            return df, "\n".join(out + [ok(f"✅ Channel added: {args[0]} --R--> {args[1]}")])
+            out_msgs.append(f"✅ Channel added: {source} --R--> {target}")
         else:
-            return df, "\n".join(out + [ok(f"✅ Channel added: {source} --{permission}/{role}--> {target}")])
+            out_msgs.append(f"✅ Channel added: {source} --{permission}/{role}--> {target}")
+        return df, "\n".join(out_msgs)
 
-    if cmd == "RemoveCh":
+    if command == "RemoveCh":
         if len(args) == 3:
             source, permission, target = args
             before = len(df)
             df = df[~((df["Source"] == source) & (df["Permission"] == permission) & (df["Target"] == target))]
             removed = before - len(df)
-            if removed == 0:
-                return df, "\n".join(out + [ok(f"⚠️ No channel found matching '{source} {permission} {target}'.")])
-            return df, "\n".join(out + [ok(f"🗑️ Channel removed: {source} --{permission}--> {target}")])
-        elif len(args) == 2:
+            out_msgs.append("🗑️ Channel removed: {} --{}--> {}"
+                            .format(source, permission, target) if removed else
+                            f"⚠️ No channel found matching '{source} {permission} {target}'.")
+            return df, "\n".join(out_msgs)
+        if len(args) == 2:
             source, target = args
             before = len(df)
             df = df[~((df["Source"] == source) & (df["Target"] == target))]
             removed = before - len(df)
-            if removed == 0:
-                return df, "\n".join(out + [ok(f"⚠️ No channel found between '{source}' and '{target}'.")])
-            return df, "\n".join(out + [ok(f"🗑️ All channels removed between '{source}' and '{target}'.")])
-        else:
-            return df, "\n".join(out + ["❌ Usage: RemoveCh Source [Permission] Target"])
+            out_msgs.append("🗑️ All channels removed between '{}' and '{}'"
+                            .format(source, target) if removed else
+                            f"⚠️ No channel found between '{source}' and '{target}'.")
+            return df, "\n".join(out_msgs)
+        out_msgs.append("❌ Usage: RemoveCh Source [Permission] Target")
+        return df, "\n".join(out_msgs)
 
-    if cmd == "show":
+    if command == "RemoveSub":
+        if len(args) != 1:
+            out_msgs.append("❌ Usage: RemoveSub S1")
+            return df, "\n".join(out_msgs)
+        s = args[0]
+        st.session_state.sujets_definis.discard(s)
+        st.session_state.subject_roles.pop(s, None)
+        df = df[df["Source"] != s]
+        out_msgs.append(f"🗑️ Subject '{s}' removed and its associated permissions cleared.")
+        return df, "\n".join(out_msgs)
+
+    if command == "RemoveObj":
+        if len(args) != 1:
+            out_msgs.append("❌ Usage: RemoveObj O1")
+            return df, "\n".join(out_msgs)
+        o = args[0]
+        st.session_state.objets_definis.discard(o)
+        df = df[(df["Source"] != o) & (df["Target"] != o)]
+        out_msgs.append(f"🗑️ Object '{o}' removed and its associated channels cleared.")
+        return df, "\n".join(out_msgs)
+
+    if command == "modifyCh":
+        if len(args) != 6:
+            out_msgs.append("❌ Usage: modifyCh oldS oldP oldT newS newP newT")
+            return df, "\n".join(out_msgs)
+        old_s, old_p, old_t, new_s, new_p, new_t = args
+        df.loc[(df["Source"] == old_s) & (df["Permission"] == old_p) & (df["Target"] == old_t),
+               ["Source", "Permission", "Target"]] = [new_s, new_p, new_t]
+        out_msgs.append(f"🔁 Path modified: {old_s} {old_p} {old_t} ➜ {new_s} {new_p} {new_t}")
+        return df, "\n".join(out_msgs)
+
+    if command == "modifySub":
+        if len(args) != 2:
+            out_msgs.append("❌ Usage: modifySub OldSub NewSub")
+            return df, "\n".join(out_msgs)
+        old_s, new_s = args
+        if old_s in st.session_state.sujets_definis:
+            st.session_state.sujets_definis.remove(old_s)
+            st.session_state.sujets_definis.add(new_s)
+        if old_s in st.session_state.subject_roles:
+            st.session_state.subject_roles[new_s] = st.session_state.subject_roles.pop(old_s)
+        df.loc[df["Source"] == old_s, "Source"] = new_s
+        df.loc[df["Target"] == old_s, "Target"] = new_s
+        out_msgs.append(f"✏️ Subject renamed: {old_s} → {new_s}")
+        return df, "\n".join(out_msgs)
+
+    if command == "modifyObj":
+        if len(args) != 2:
+            out_msgs.append("❌ Usage: modifyObj OldObj NewObj")
+            return df, "\n".join(out_msgs)
+        old_o, new_o = args
+        if old_o in st.session_state.objets_definis:
+            st.session_state.objets_definis.remove(old_o)
+            st.session_state.objets_definis.add(new_o)
+        df.loc[df["Source"] == old_o, "Source"] = new_o
+        df.loc[df["Target"] == old_o, "Target"] = new_o
+        out_msgs.append(f"✏️ Object renamed : {old_o} → {new_o}")
+        return df, "\n".join(out_msgs)
+
+    if command == "show":
         process_data_display(df)
-        return df, "\n".join(out + ["🚀 Génération des graphes…"])
+        out_msgs.append("🚀 Génération des graphes…")
+        return df, "\n".join(out_msgs)
 
-    return df, "\n".join(out + ["❌ Unknown command."])
+    out_msgs.append("❌ Unknown command.")
+    return df, "\n".join(out_msgs)
+
 
 # ======================= UI / CALLBACK =====================
 def _run_command_callback():
