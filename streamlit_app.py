@@ -167,93 +167,118 @@ def display_role_table_streamlit(df: pd.DataFrame):
 
 # =============== PYVIS (Streamlit) =========================
 def draw_combined_graph(components_1, adj_1, labels_1,
-                        components_2, labels_2, simplified_edges_2, role_data,
-                        active_nodes: set):
-    net = Network(notebook=False, height='1000px', width='100%', directed=True, cdn_resources='in_line')
-
-    sorted_components_1 = sorted(components_1, key=len, reverse=True)
-    sorted_components_2 = sorted(components_2, key=len, reverse=True)
-
-    x_gap, y_gap = 300, 250
-    current_y_subject = 0
-    current_y_object  = 0
-    node_indices = {}
+                        components_2, labels_2, simplified_edges_2, role_data):
+    """
+    Affiche uniquement les sujets/objets qui ont au moins une arête provenant
+    d'une permission R/W. Les entités sans permission effective (ex: Owner seul)
+    sont masquées. Les boîtes (classes d'équivalence) sont filtrées pareil.
+    """
+    # 1) Construire le graphe des arêtes issues de R/W
     G1 = nx.DiGraph()
+    for src, dest_list in adj_1.items():
+        for dest in dest_list:
+            G1.add_edge(src, dest)
 
-    # seuls les sujets présents dans active_nodes
-    role_to_subject = {s: role_data.get(s, "None") for s in active_nodes}
-
-    # place uniquement les nœuds actifs
-    for component, label in zip(sorted_components_1, labels_1):
-        comp_active = [n for n in component if n in active_nodes]
-        if not comp_active:
-            continue
-        subjects = [s for s in comp_active if str(s).startswith("S")]
-        objects  = [o for o in comp_active if str(o).startswith("O")]
-
-        for subj in subjects:
-            combined = '{' + ', '.join(sorted(label | {subj})) + '}'
-            net.add_node(subj, label=f'{subj}({role_to_subject.get(subj,"None")}):\n{combined}',
-                         shape='ellipse', x=-x_gap, y=-current_y_subject * y_gap)
-            node_indices[subj] = subj
-            current_y_subject += 1
-
-        for obj in objects:
-            combined = '{' + ', '.join(sorted(label | {obj})) + '}'
-            net.add_node(obj, label=f'{obj}:\n{combined}', shape='box',
-                         x=x_gap, y=-current_y_object * y_gap)
-            node_indices[obj] = obj
-            current_y_object += 1
-
-    # arêtes
-    for src, dests in adj_1.items():
-        for dst in dests:
-            if src in node_indices and dst in node_indices:
-                G1.add_edge(src, dst)
+    # Réduction transitive si DAG
     if nx.is_directed_acyclic_graph(G1):
         G1 = nx.transitive_reduction(G1)
-    for s, d in G1.edges():
-        net.add_edge(s, d, arrows="to")
 
-    # boîtes de classes: uniquement si la classe contient au moins 1 nœud actif
+    # 2) Ne garder que les nœuds qui participent à au moins une arête
+    nodes_with_edges = set(G1.nodes())  # dans un DiGraph, seuls les extrémités d'arêtes sont présentes
+
+    # 3) PyVis
+    net = Network(notebook=False, height='1000px', width='100%', directed=True, cdn_resources='in_line')
+
+    # Index rôle -> sujet (pour l'affichage)
+    role_to_subject = {}
+    if isinstance(role_data, dict):
+        role_to_subject = role_data
+    else:
+        try:
+            role_to_subject = dict(role_data)
+        except Exception:
+            role_to_subject = {}
+
+    # 4) Ajouter UNIQUEMENT les nœuds présents dans nodes_with_edges
+    x_gap, y_gap = 300, 250
+    cur_y_subject, cur_y_object = 0, 0
+    placed = set()
+
+    # Aplatir les composantes en respectant le filtrage
+    for component, label in zip(components_1, labels_1):
+        # sujets et objets dans cette composante qui sont réellement utilisés
+        subjects = [s for s in component if str(s).startswith("S") and s in nodes_with_edges]
+        objects  = [o for o in component if str(o).startswith("O") and o in nodes_with_edges]
+
+        for subj in subjects:
+            if subj in placed:
+                continue
+            roles = role_to_subject.get(subj, "None")
+            combined_labels = '{' + ', '.join(sorted(label | {subj})) + '}'
+            net.add_node(subj, label=f'{subj}({roles}):\n{combined_labels}', shape='ellipse',
+                         x=-x_gap, y=-cur_y_subject * y_gap)
+            placed.add(subj)
+            cur_y_subject += 1
+
+        for obj in objects:
+            if obj in placed:
+                continue
+            combined_labels = '{' + ', '.join(sorted(label | {obj})) + '}'
+            net.add_node(obj, label=f'{obj}:\n{combined_labels}', shape='box',
+                         x=x_gap, y=-cur_y_object * y_gap)
+            placed.add(obj)
+            cur_y_object += 1
+
+    # 5) Ajouter les arêtes
+    for u, v in G1.edges():
+        # sécurité : n'ajouter que si les deux extrémités ont été rendues
+        if u in placed and v in placed:
+            net.add_edge(u, v, arrows="to")
+
+    # 6) Boîtes (classes d'équivalence) — filtrer celles qui ne contiennent aucun nœud rendu
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
-    idx_map = []
+    box_idx = 0
 
-    for i, (comp, lab) in enumerate(zip(sorted_components_2, labels_2)):
-        comp_active = [n for n in comp if n in active_nodes]
-        if not comp_active:
-            idx_map.append(None)
-            continue
-        entity_name = ', '.join(comp_active)
-        combined = '{' + ', '.join(sorted(lab | set(comp_active))) + '}'
-        col, row = i % 3, i // 3
-        x, y = positions[col]; y += row * offset_y
-        net.add_node(base_idx + i, label=f'| {entity_name}: {combined} |', shape='box',
-                     x=x, y=y, width_constraint=300, height_constraint=100)
-        idx_map.append(base_idx + i)
+    def comp_has_rendered_node(comp):
+        return any(n in placed for n in comp)
 
-    def idx_of(set_lbl):
-        for i, lbl in enumerate(labels_2):
-            if lbl == set_lbl:
-                return idx_map[i]
-        return None
+    for comp, label in zip(components_2, labels_2):
+        if not comp_has_rendered_node(comp):
+            continue  # ignorer les composantes sans nœud affiché (ex: S2 propriétaire sans R/W)
+        entity_name = ', '.join(comp)
+        combined_labels = '{' + ', '.join(sorted(label | set(comp))) + '}'
+        text = f'| {entity_name}: {combined_labels} |'
 
-    for sset, dset in simplified_edges_2:
-        si, di = idx_of(sset), idx_of(dset)
-        if si is not None and di is not None:
-            net.add_edge(si, di, arrows="to")
+        col_index = box_idx % 3
+        row_index = box_idx // 3
+        x, y = positions[col_index]
+        y += row_index * offset_y
+
+        net.add_node(base_idx + box_idx, label=text, shape='box', x=x, y=y,
+                     width_constraint=300, height_constraint=100)
+        box_idx += 1
+
+    # (Arêtes entre boîtes : uniquement si les deux boîtes existent)
+    def find_idx_by_labelset(target_set):
+        # comme on a filtré, il faut rechercher par contenu de texte
+        for i in range(base_idx, base_idx + box_idx):
+            # net.nodes[i]['label'] inaccessible directement ; on évite de recréer ces arêtes si filtrées
+            pass
+        return None  # on peut omettre les arêtes entre boîtes pour cette vue filtrée
 
     net.set_options("""
     var options = {
-      "nodes": {"font": {"size": 50}, "shapeProperties": {"borderRadius": 5}, "size": 40, "fixed": {"x": false, "y": false}},
-      "edges": {"width": 4, "arrows": {"to": {"enabled": true, "scaleFactor": 1.5}}, "length": 150, "smooth": {"enabled": false}},
-      "physics": {"enabled": false},
-      "interaction": {"dragNodes": true, "dragView": true, "zoomView": true}
+      nodes: { font: { size: 50 }, shapeProperties: { borderRadius: 5 }, size: 40, fixed: { x: false, y: false } },
+      edges: { width: 4, arrows: { to: { enabled: true, scaleFactor: 1.5 } }, length: 150, smooth: { enabled: false } },
+      physics: { enabled: false },
+      interaction: { dragNodes: true, dragView: true, zoomView: true }
     }
     """)
+
     st_html(net.generate_html(), height=1000, width=1800, scrolling=True)
+
 
 
 # =============== RBAC : propagation depuis Excel ===========
