@@ -457,8 +457,8 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     # DAC: création d'objet avec propriétaire (Owner) – PAS de lecture auto
     # ========= DAC =========
 # S2 AddObj O2  => crée l'objet O2 avec propriétaire S2, SANS lecture auto
-if len(parts) >= 3 and parts[1] == "AddObj":
-    owner, obj = parts[0], parts[2]
+    if len(parts) >= 3 and parts[1] == "AddObj":
+        owner, obj = parts[0], parts[2]
 
     if owner not in st.session_state.sujets_definis:
         return df, "\n".join(out_msgs + ["⛔ Error: Subject '{owner}' does not exist. Use AddSub first."])
