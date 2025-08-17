@@ -166,8 +166,7 @@ def display_role_table_streamlit(df: pd.DataFrame):
     st.dataframe(df_role, use_container_width=True)
 
 # =============== PYVIS (Streamlit) =========================
-def draw_combined_graph(components_1, adj_1, labels_1,
-                        components_2, labels_2, simplified_edges_2, role_data):
+def draw_combined_graph(components_1, adj_1, labels_1,components_2, labels_2, simplified_edges_2, role_data):
     """
     Affiche uniquement les sujets/objets qui ont au moins une arête provenant
     d'une permission R/W. Les entités sans permission effective (ex: Owner seul)
@@ -256,8 +255,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         x, y = positions[col_index]
         y += row_index * offset_y
 
-        net.add_node(base_idx + box_idx, label=text, shape='box', x=x, y=y,
-                     width_constraint=300, height_constraint=100)
+        net.add_node(base_idx + box_idx, label=text, shape='box', x=x, y=y,width_constraint=300, height_constraint=100)
         box_idx += 1
 
     # (Arêtes entre boîtes : uniquement si les deux boîtes existent)
