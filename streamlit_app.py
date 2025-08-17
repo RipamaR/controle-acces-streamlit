@@ -169,95 +169,117 @@ def display_role_table_streamlit(df: pd.DataFrame):
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
     """
-    Affiche uniquement les nœuds qui participent à une arête issue d'une
-    permission R/W. Les propriétaires (Owner) non autorisés ne sont pas rendus.
+    Affiche uniquement les sujets/objets impliqués dans des arêtes R/W.
+    Donc un propriétaire (Owner) *seul* n'apparaît pas tant qu'il n'a pas une lecture/écriture explicite.
     """
-    # Graphe des arêtes R/W seulement
+    # --- NOEUDS AUTORISÉS (ceux qui sont vraiment sur des arêtes) ---
+    edge_nodes = set(adj_1.keys()) | {v for lst in adj_1.values() for v in lst}
+    allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and n.startswith("S")}
+    allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and n.startswith("O")}
+
+    net = Network(notebook=False, height='1000px', width='100%', directed=True, cdn_resources='in_line')
+
+    # On garde seulement les composantes contenant au moins un nœud autorisé
+    def comp_has_allowed(c):
+        return any((n in allowed_subjects or n in allowed_objects) for n in c)
+
+    filtered_components_1 = [c for c in components_1 if comp_has_allowed(c)]
+    filtered_labels_1     = [lbl for c, lbl in zip(components_1, labels_1) if comp_has_allowed(c)]
+
+    # idem pour les boîtes en bas
+    filtered_components_2 = [c for c in components_2 if comp_has_allowed(c)]
+    filtered_labels_2     = [lbl for c, lbl in zip(components_2, labels_2) if comp_has_allowed(c)]
+
+    # Tri simplement pour un rendu stable
+    sorted_components_1 = sorted(filtered_components_1, key=len, reverse=True)
+    sorted_components_2 = sorted(filtered_components_2, key=len, reverse=True)
+    labels_1 = filtered_labels_1
+    labels_2 = filtered_labels_2
+
+    x_gap = 300
+    y_gap = 250
+    current_y_subject = 0
+    current_y_object = 0
+    node_indices = {}
     G1 = nx.DiGraph()
-    for src, dests in adj_1.items():
-        for dst in dests:
-            G1.add_edge(src, dst)
+
+    # Rôle (si disponible)
+    role_to_subject = {subject: role_data.get(subject, "No role") for subject in allowed_subjects}
+
+    # --- Colonne gauche (S) / droite (O) ---
+    for component, label in zip(sorted_components_1, labels_1):
+        subjects = [s for s in component if isinstance(s, str) and s.startswith("S") and s in allowed_subjects]
+        objects  = [o for o in component if isinstance(o, str) and o.startswith("O") and o in allowed_objects]
+
+        for subj in subjects:
+            roles = role_to_subject.get(subj, "No role")
+            combined_labels = '{' + ', '.join(sorted(label | {subj})) + '}'
+            text = f'{subj}({roles}):\n{combined_labels}'
+            net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-current_y_subject * y_gap)
+            node_indices[subj] = subj
+            current_y_subject += 1
+
+        for obj in objects:
+            combined_labels = '{' + ', '.join(sorted(label | {obj})) + '}'
+            net.add_node(obj, label=f'{obj}:\n{combined_labels}', shape='box', x=x_gap, y=-current_y_object * y_gap)
+            node_indices[obj] = obj
+            current_y_object += 1
+
+    # --- Arêtes (uniquement celles qui relient des nœuds autorisés) ---
+    for src, dest_list in adj_1.items():
+        for dest in dest_list:
+            if src in node_indices and dest in node_indices:
+                G1.add_edge(src, dest)
 
     if nx.is_directed_acyclic_graph(G1):
         G1 = nx.transitive_reduction(G1)
 
-    # Nœuds effectivement reliés par une arête
-    nodes_with_edges = set(G1.nodes())
+    for src, dest in G1.edges():
+        net.add_edge(src, dest, arrows="to")
 
-    net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
-
-    role_to_subject = {}
-    try:
-        role_to_subject = dict(role_data) if role_data is not None else {}
-    except Exception:
-        role_to_subject = {}
-
-    x_gap, y_gap = 300, 250
-    cur_y_subject, cur_y_object = 0, 0
-    placed = set()
-
-    # On ajoute uniquement les nœuds présents dans nodes_with_edges
-    for component, label in zip(components_1, labels_1):
-        subjects = [s for s in component if str(s).startswith("S") and s in nodes_with_edges]
-        objects  = [o for o in component if str(o).startswith("O") and o in nodes_with_edges]
-
-        for subj in subjects:
-            if subj in placed: 
-                continue
-            roles = role_to_subject.get(subj, "None")
-            combined = "{" + ", ".join(sorted(label | {subj})) + "}"
-            net.add_node(subj, label=f"{subj}({roles}):\n{combined}", shape="ellipse",
-                         x=-x_gap, y=-cur_y_subject * y_gap)
-            placed.add(subj)
-            cur_y_subject += 1
-
-        for obj in objects:
-            if obj in placed: 
-                continue
-            combined = "{" + ", ".join(sorted(label | {obj})) + "}"
-            net.add_node(obj, label=f"{obj}:\n{combined}", shape="box",
-                         x=x_gap, y=-cur_y_object * y_gap)
-            placed.add(obj)
-            cur_y_object += 1
-
-    # Arêtes entre nœuds effectivement placés
-    for u, v in G1.edges():
-        if u in placed and v in placed:
-            net.add_edge(u, v, arrows="to")
-
-    # Boîtes du bas : ne montrer que les composantes qui contiennent au moins un nœud rendu
+    # --- Boîtes des classes d'équivalence (en bas) ---
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
-    box_i = 0
 
-    def comp_has_rendered_node(comp):
-        return any(n in placed for n in comp)
-
-    for comp, label in zip(components_2, labels_2):
-        if not comp_has_rendered_node(comp):
+    for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
+        # n'afficher la boîte que si la compo contient au moins un nœud autorisé
+        if not comp_has_allowed(component):
             continue
-        entity_name = ", ".join(comp)
-        combined = "{" + ", ".join(sorted(label | set(comp))) + "}"
-        text = f"| {entity_name}: {combined} |"
+        entity_name = ', '.join(component)
+        combined_labels = '{' + ', '.join(sorted(label | set(component))) + '}'
+        text = f'| {entity_name}: {combined_labels} |'
+        col_index = i % 3
+        row_index = i // 3
+        x, y = positions[col_index]
+        y += row_index * offset_y
+        net.add_node(base_idx + i, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
 
-        col = box_i % 3
-        row = box_i // 3
-        x, y = positions[col]
-        y += row * offset_y
+    # Raccourcis pour retrouver les indices des labels 2
+    def find_idx_by_labelset(target_set):
+        for i, lbl in enumerate(labels_2):
+            if lbl == target_set:
+                return i
+        return None
 
-        net.add_node(base_idx + box_i, label=text, shape="box",
-                     x=x, y=y, width_constraint=300, height_constraint=100)
-        box_i += 1
+    for src_set, dest_set in simplified_edges_2:
+        si = find_idx_by_labelset(src_set)
+        di = find_idx_by_labelset(dest_set)
+        if si is not None and di is not None:
+            net.add_edge(base_idx + si, base_idx + di, arrows="to")
 
     net.set_options("""
-      var options = {
-        nodes: { font: { size: 50 }, shapeProperties: { borderRadius: 5 }, size: 40, fixed: { x:false, y:false } },
-        edges: { width: 4, arrows: { to: { enabled: true, scaleFactor: 1.5 } }, length: 150, smooth: { enabled:false } },
-        physics: { enabled:false }, interaction: { dragNodes:true, dragView:true, zoomView:true }
-      }
+    var options = {
+      "nodes": {"font": {"size": 50}, "shapeProperties": {"borderRadius": 5}, "size": 40, "fixed": {"x": false, "y": false}},
+      "edges": {"width": 4, "arrows": {"to": {"enabled": true, "scaleFactor": 1.5}}, "length": 150, "smooth": {"enabled": false}},
+      "physics": {"enabled": false},
+      "interaction": {"dragNodes": true, "dragView": true, "zoomView": true}
+    }
     """)
-    st_html(net.generate_html(), height=1000, width=1800, scrolling=True)
+
+    html_str = net.generate_html()
+    st_html(html_str, height=1000, width=1800, scrolling=True)
+
 
 
 
