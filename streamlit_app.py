@@ -21,7 +21,7 @@ from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
 
 # ===================== CONFIG UI ===========================
-st.set_page_config(page_title="Contrôle d'accès – RBAC / DAC / China-Wall", layout="wide")
+st.set_page_config(page_title="Interface graphique pour la représentation de contrôle de flux de données sécuritaires – RBAC / DAC / China-Wall", layout="wide")
 
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
