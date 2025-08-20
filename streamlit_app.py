@@ -7,7 +7,6 @@
 #  - Terminal de commandes
 #  - EvalPerf (benchmark Tarjan / propagation)
 #  - Chargement Excel (RBAC ou Entités)
-#  - ✅ Graphe combiné compatible "entités seules" (sans S*/O*)
 # -----------------------------------------------------------
 
 import io
@@ -115,15 +114,14 @@ def simplify_relations(labels):
                     if len(path) > 2:
                         transitive_edges.add((i, j))
     for e in transitive_edges:
-        if reduced.has_edge(*e):
-            reduced.remove_edge(*e)
+        reduced.remove_edge(*e)
     return [(label_map[u], label_map[v]) for u, v in reduced.edges()]
 
 # =============== CONSTRUCTION DE L’ADJACENCE =================
 def apply_permissions(df_effective: pd.DataFrame):
     """
     Adjacence **uniquement** depuis les lignes R/W.
-    Aucune prise en compte de Owner/None (➡️ pas d’accès implicite du propriétaire).
+    Aucune prise en compte de Owner/None.
     """
     adj = {}
     def add_edge(a, b):
@@ -187,6 +185,8 @@ def draw_main_graph(df: pd.DataFrame):
     if df.empty:
         st.info("Aucune donnée pour générer le graphe.")
         return
+
+    # uniquement R/W
     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
     if df_eff.empty:
         st.info("Aucune relation R/W à afficher.")
@@ -194,14 +194,16 @@ def draw_main_graph(df: pd.DataFrame):
 
     adj = apply_permissions(df_eff)
 
-    # SCC pour placement
+    # Composantes SCC (pour couleurs/placement)
     G_adj = nx.DiGraph()
     for u, vs in adj.items():
         for v in vs:
             G_adj.add_edge(u, v)
     scc = list(nx.strongly_connected_components(G_adj))
-    scc_sorted = sorted(scc, key=len)  # du plus petit en haut
+    # du plus petit en haut au plus grand en bas
+    scc_sorted = sorted(scc, key=len)
 
+    # positions grille
     x_step, y_step = 400, 300
     x_positions = [-2*x_step, -x_step, 0, x_step, 2*x_step]
     node_pos = {}
@@ -214,17 +216,17 @@ def draw_main_graph(df: pd.DataFrame):
         current_y += y_step
 
     net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
-
+    # nœuds
     all_nodes = set(adj.keys()) | {v for lst in adj.values() for v in lst}
     for n in sorted(all_nodes):
-        n_str = str(n)
-        shape = "ellipse" if n_str.startswith("S") else "box"
+        shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
         x, y = node_pos.get(n, (0, 0))
-        net.add_node(n_str, label=n_str, shape=shape, color="lightblue", x=x, y=y)
+        net.add_node(n, label=n, shape=shape, color="lightblue", x=x, y=y)
 
+    # arêtes
     for src, dests in adj.items():
         for d in dests:
-            net.add_edge(str(src), str(d), arrows="to")
+            net.add_edge(src, d, arrows="to")
 
     _pyvis_show(net)
 
@@ -239,35 +241,42 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
     net = Network(notebook=False, height="750px", width="100%", directed=True, cdn_resources="in_line")
 
     for n in sorted(component_nodes):
-        n_str = str(n)
-        shape = "ellipse" if n_str.startswith("S") else "box"
-        net.add_node(n_str, label=n_str, shape=shape, color="lightcoral")
+        shape = "ellipse" if n.startswith("S") else "box"
+        net.add_node(n, label=n, shape=shape, color="lightcoral")
 
     for s, dests in adj.items():
         for d in dests:
             if s in component_nodes and d in component_nodes:
-                net.add_edge(str(s), str(d), arrows="to")
+                net.add_edge(s, d, arrows="to")
 
     _pyvis_show(net, height=750)
 
-# =============== GRAPHE COMBINÉ (✅ entités-seules aussi) ===
+# =============== SECTION « TABLE + GRAPHE COMBINÉ » =========
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
+    """
+    ✅ Compatible RBAC (S*/O*) ET entités 'pures' (sans préfixes).
+    - Si des S/O sont détectés, on garde l'ancien comportement (S à gauche, O à droite).
+    - Sinon, on affiche toutes les entités (split visuel gauche/droite) sans filtrage.
+    """
     # n’afficher que les nœuds présents sur des arêtes
     edge_nodes = set(adj_1.keys()) | {v for lst in adj_1.values() for v in lst}
+
     # Détecter si on est en mode S/O
-    has_SO = any(str(n).startswith("S") or str(n).startswith("O") for n in edge_nodes)
+    has_SO = any(isinstance(n, str) and (n.startswith("S") or n.startswith("O")) for n in edge_nodes)
 
     if has_SO:
-        allowed_subjects = {n for n in edge_nodes if str(n).startswith("S")}
-        allowed_objects  = {n for n in edge_nodes if str(n).startswith("O")}
+        allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and n.startswith("S")}
+        allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and n.startswith("O")}
         def comp_has_allowed(c):
             return any((n in allowed_subjects or n in allowed_objects) for n in c)
     else:
+        # Mode entités “pures” : on ne filtre pas par S/O
         allowed_entities = set(edge_nodes)
         def comp_has_allowed(c):
             return any(n in allowed_entities for n in c)
 
+    # Filtrage des composantes selon la présence effective dans les arêtes
     filtered_components_1 = [c for c in components_1 if comp_has_allowed(c)]
     filtered_labels_1     = [lbl for c, lbl in zip(components_1, labels_1) if comp_has_allowed(c)]
     filtered_components_2 = [c for c in components_2 if comp_has_allowed(c)]
@@ -278,34 +287,44 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     labels_1 = filtered_labels_1
     labels_2 = filtered_labels_2
 
+    from pyvis.network import Network
+    import networkx as nx
+
     x_gap, y_gap = 300, 250
     cur_y_left = 0
     cur_y_right = 0
     node_indices = {}
     G1 = nx.DiGraph()
+
+    # En mode S/O, on n'affiche les rôles que pour les S*
     role_to_subject = {s: role_data.get(s, "No role") for s in edge_nodes}
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
     net.set_options(PYVIS_OPTIONS)
 
-    def node_shape(n):
+    def node_shape(n: str):
         if has_SO:
             return 'ellipse' if str(n).startswith("S") else 'box'
         return 'box'  # entités simples
 
-    def subj_roles_text(n):
+    def subj_roles_text(n: str):
         if has_SO and str(n).startswith("S"):
             return role_to_subject.get(n, "No role")
         return "No role"
 
+    # Haut : entités/subjects/objects avec leurs étiquettes
     for component, label in zip(sorted_components_1, labels_1):
+        comp_nodes = [n for n in component if n in edge_nodes]
+        if not comp_nodes:
+            continue
+
         if has_SO:
-            left_nodes  = [s for s in component if str(s).startswith("S") and s in edge_nodes]
-            right_nodes = [o for o in component if str(o).startswith("O") and o in edge_nodes]
+            left_nodes  = [s for s in comp_nodes if str(s).startswith("S")]
+            right_nodes = [o for o in comp_nodes if str(o).startswith("O")]
         else:
-            comp_list = list(component)
-            half = max(1, len(comp_list)//2)
-            left_nodes, right_nodes = comp_list[:half], comp_list[half:]
+            # Split visuel gauche/droite pour entités pures
+            half = max(1, len(comp_nodes)//2)
+            left_nodes, right_nodes = comp_nodes[:half], comp_nodes[half:]
 
         for n in left_nodes:
             roles = subj_roles_text(n)
@@ -321,6 +340,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
             node_indices[str(n)] = str(n)
             cur_y_right += 1
 
+    # Arêtes au milieu (réduction transitive si DAG)
     for src, dests in adj_1.items():
         for dest in dests:
             s = str(src); d = str(dest)
@@ -332,10 +352,11 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     for s, d in G1.edges():
         net.add_edge(s, d, arrows="to")
 
-    # boîtes du bas (classes)
+    # Bas : boîtes de classes (labels propagés) + relations simplifiées
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
+
     def find_idx_by_labelset(target_set):
         for i, lbl in enumerate(labels_2):
             if lbl == target_set:
@@ -343,7 +364,8 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         return None
 
     for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
-        if not comp_has_allowed(component): continue
+        if not comp_has_allowed(component):
+            continue
         entity_name = ', '.join(map(str, component))
         combined = '{' + ', '.join(sorted({str(x) for x in (label | set(component))})) + '}'
         text = f'| {entity_name}: {combined} |'
@@ -358,6 +380,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
             net.add_edge(base_idx+si, base_idx+di, arrows="to")
 
     _pyvis_show(net, height=1000, width=1800)
+
 
 # =============== PROPAGATION RBAC (fichiers) =================
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
@@ -400,7 +423,6 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
         e1 = str(row[col_e1]).strip()
         e2 = str(row[col_e2]).strip()
         if e1 and e1.lower() != "nan" and e2 and e2.lower() != "nan":
-            # Convention: E2 peut lire E1 (=> arête R/W effective)
             rows.append({"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None})
     if not rows:
         raise ValueError("Aucune paire valide (Entity1, Entity2) trouvée.")
@@ -408,6 +430,7 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
 
 # =============== PERF (Tarjan vs Propagation) ===============
 def evaluer_performance_interface(nb_entites: int):
+    # graphe aléatoire très épars
     G = nx.DiGraph()
     G.add_nodes_from([f"E{i}" for i in range(nb_entites)])
     for i in range(nb_entites):
@@ -457,7 +480,8 @@ def process_data_display(df: pd.DataFrame):
         return
 
     adj = apply_permissions(df_effective)
-    active_nodes = set(adj.keys()) | {v for lst in adj.values() for v in lst}
+    active_nodes = set(adj.keys())
+    for lst in adj.values(): active_nodes.update(lst)
 
     V = sorted(active_nodes)
     scc, cmap = tarjan(V, adj)
@@ -475,6 +499,7 @@ def process_data_display(df: pd.DataFrame):
     role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
     draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
 
+    # ====== Graphe principal + composants (SCC) ======
     st.markdown("---")
     st.subheader("Vue principale (toutes arêtes R/W)")
     draw_main_graph(df_expanded)
@@ -487,14 +512,13 @@ def process_data_display(df: pd.DataFrame):
 
     cols = st.columns(4)
     for i, comp in enumerate(scc):
-        label = ", ".join(sorted(map(str, comp)))
+        label = ", ".join(sorted(comp))
         if cols[i % 4].button(f"Voir: {label}", key=f"sccbtn_{i}"):
             st.session_state.selected_component = i
 
     if st.session_state.selected_component is not None:
-        chosen = scc[st.session_state.selected_component]
-        st.success(f"Composant sélectionné: {', '.join(sorted(map(str, chosen)))}")
-        draw_component_graph(df_expanded, set(chosen))
+        st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
+        draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
         if st.button("↩️ Revenir au graphe principal"):
             st.session_state.selected_component = None
 
