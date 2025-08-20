@@ -254,29 +254,14 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
 # =============== SECTION « TABLE + GRAPHE COMBINÉ » =========
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
-    """
-    ✅ Compatible RBAC (S*/O*) ET entités 'pures' (sans préfixes).
-    - Si des S/O sont détectés, on garde l'ancien comportement (S à gauche, O à droite).
-    - Sinon, on affiche toutes les entités (split visuel gauche/droite) sans filtrage.
-    """
     # n’afficher que les nœuds présents sur des arêtes
     edge_nodes = set(adj_1.keys()) | {v for lst in adj_1.values() for v in lst}
+    allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and n.startswith("S")}
+    allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and n.startswith("O")}
 
-    # Détecter si on est en mode S/O
-    has_SO = any(isinstance(n, str) and (n.startswith("S") or n.startswith("O")) for n in edge_nodes)
+    def comp_has_allowed(c):
+        return any((n in allowed_subjects or n in allowed_objects) for n in c)
 
-    if has_SO:
-        allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and n.startswith("S")}
-        allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and n.startswith("O")}
-        def comp_has_allowed(c):
-            return any((n in allowed_subjects or n in allowed_objects) for n in c)
-    else:
-        # Mode entités “pures” : on ne filtre pas par S/O
-        allowed_entities = set(edge_nodes)
-        def comp_has_allowed(c):
-            return any(n in allowed_entities for n in c)
-
-    # Filtrage des composantes selon la présence effective dans les arêtes
     filtered_components_1 = [c for c in components_1 if comp_has_allowed(c)]
     filtered_labels_1     = [lbl for c, lbl in zip(components_1, labels_1) if comp_has_allowed(c)]
     filtered_components_2 = [c for c in components_2 if comp_has_allowed(c)]
@@ -287,75 +272,54 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     labels_1 = filtered_labels_1
     labels_2 = filtered_labels_2
 
-    from pyvis.network import Network
-    import networkx as nx
-
     x_gap, y_gap = 300, 250
-    cur_y_left = 0
-    cur_y_right = 0
+    cur_y_S = 0; cur_y_O = 0
     node_indices = {}
     G1 = nx.DiGraph()
-
-    # En mode S/O, on n'affiche les rôles que pour les S*
-    role_to_subject = {s: role_data.get(s, "No role") for s in edge_nodes}
+    role_to_subject = {s: role_data.get(s, "No role") for s in allowed_subjects}
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
-    net.set_options(PYVIS_OPTIONS)
 
-    def node_shape(n: str):
-        if has_SO:
-            return 'ellipse' if str(n).startswith("S") else 'box'
-        return 'box'  # entités simples
-
-    def subj_roles_text(n: str):
-        if has_SO and str(n).startswith("S"):
-            return role_to_subject.get(n, "No role")
-        return "No role"
-
-    # Haut : entités/subjects/objects avec leurs étiquettes
     for component, label in zip(sorted_components_1, labels_1):
-        comp_nodes = [n for n in component if n in edge_nodes]
-        if not comp_nodes:
-            continue
+        subjects = [s for s in component if s.startswith("S") and s in allowed_subjects]
+        objects  = [o for o in component if o.startswith("O") and o in allowed_objects]
 
-        if has_SO:
-            left_nodes  = [s for s in comp_nodes if str(s).startswith("S")]
-            right_nodes = [o for o in comp_nodes if str(o).startswith("O")]
-        else:
-            # Split visuel gauche/droite pour entités pures
-            half = max(1, len(comp_nodes)//2)
-            left_nodes, right_nodes = comp_nodes[:half], comp_nodes[half:]
+        for subj in subjects:
+            roles = role_to_subject.get(subj, "No role")
+            combined = '{' + ', '.join(sorted(label | {subj})) + '}'
+            text = f'{subj}({roles}):\n{combined}'
+            net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-cur_y_S*y_gap)
+            node_indices[subj] = subj
+            cur_y_S += 1
 
-        for n in left_nodes:
-            roles = subj_roles_text(n)
-            combined = '{' + ', '.join(sorted({str(x) for x in (label | {str(n)})})) + '}'
-            text = f'{n}({roles}):\n{combined}' if (has_SO and str(n).startswith("S")) else f'{n}:\n{combined}'
-            net.add_node(str(n), label=text, shape=node_shape(n), x=-x_gap, y=-cur_y_left*y_gap)
-            node_indices[str(n)] = str(n)
-            cur_y_left += 1
+        for obj in objects:
+            combined = '{' + ', '.join(sorted(label | {obj})) + '}'
+            net.add_node(obj, label=f'{obj}:\n{combined}', shape='box', x=x_gap, y=-cur_y_O*y_gap)
+            node_indices[obj] = obj
+            cur_y_O += 1
 
-        for n in right_nodes:
-            combined = '{' + ', '.join(sorted({str(x) for x in (label | {str(n)})})) + '}'
-            net.add_node(str(n), label=f'{n}:\n{combined}', shape=node_shape(n), x=x_gap, y=-cur_y_right*y_gap)
-            node_indices[str(n)] = str(n)
-            cur_y_right += 1
-
-    # Arêtes au milieu (réduction transitive si DAG)
     for src, dests in adj_1.items():
         for dest in dests:
-            s = str(src); d = str(dest)
-            if s in node_indices and d in node_indices:
-                G1.add_edge(s, d)
+            if src in node_indices and dest in node_indices:
+                G1.add_edge(src, dest)
 
     if nx.is_directed_acyclic_graph(G1):
         G1 = nx.transitive_reduction(G1)
     for s, d in G1.edges():
         net.add_edge(s, d, arrows="to")
 
-    # Bas : boîtes de classes (labels propagés) + relations simplifiées
+    # boîtes du bas (classes)
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
+    for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
+        if not comp_has_allowed(component): continue
+        entity_name = ', '.join(component)
+        combined = '{' + ', '.join(sorted(label | set(component))) + '}'
+        text = f'| {entity_name}: {combined} |'
+        col = i % 3; row = i // 3
+        x, y = positions[col]; y += row*offset_y
+        net.add_node(base_idx+i, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
 
     def find_idx_by_labelset(target_set):
         for i, lbl in enumerate(labels_2):
@@ -363,24 +327,12 @@ def draw_combined_graph(components_1, adj_1, labels_1,
                 return i
         return None
 
-    for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
-        if not comp_has_allowed(component):
-            continue
-        entity_name = ', '.join(map(str, component))
-        combined = '{' + ', '.join(sorted({str(x) for x in (label | set(component))})) + '}'
-        text = f'| {entity_name}: {combined} |'
-        col = i % 3; row = i // 3
-        x, y = positions[col]; y += row*offset_y
-        net.add_node(base_idx+i, label=text, shape='box', x=x, y=y,
-                     width_constraint=300, height_constraint=100)
-
     for src_set, dest_set in simplified_edges_2:
         si = find_idx_by_labelset(src_set); di = find_idx_by_labelset(dest_set)
         if si is not None and di is not None:
             net.add_edge(base_idx+si, base_idx+di, arrows="to")
 
     _pyvis_show(net, height=1000, width=1800)
-
 
 # =============== PROPAGATION RBAC (fichiers) =================
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
