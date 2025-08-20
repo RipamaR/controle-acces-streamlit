@@ -10,6 +10,7 @@
 # -----------------------------------------------------------
 
 import io
+import re
 import time
 import random
 import pandas as pd
@@ -38,13 +39,52 @@ def init_state():
         "interdictions_entites": {},
         "history": [],
         "selected_component": None,   # index SCC sélectionné
-        "entities_mode": False,       # <<< NOUVEAU : vrai si fichier Entités
     }
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
 
 init_state()
+
+# ===================== NORMALISATION =======================
+_NAN_SET = {"", "nan", "none", "null"}
+
+def _norm_entity(x: object) -> str | None:
+    """Normalise S, O, ou tout identifiant d'entité (supprime espaces, majuscules, O01->O1)."""
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return None
+    s = str(x).strip()
+    if s.lower() in _NAN_SET:
+        return None
+    # compacte espaces internes (ex: "O  1" -> "O1")
+    s = re.sub(r"\s+", "", s)
+    # S / O + nombre éventuel -> majuscules et supprime les zéros non-significatifs
+    m = re.fullmatch(r"([a-zA-Z]+)0*([0-9]+)", s)
+    if m:
+        return f"{m.group(1).upper()}{int(m.group(2))}"
+    return s.upper()
+
+def _norm_perm(x: object) -> str | None:
+    if x is None or (isinstance(x, float) and pd.isna(x)):
+        return None
+    s = str(x).strip()
+    if s.lower() in _NAN_SET:
+        return None
+    return s.upper()
+
+def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Nettoie systématiquement les colonnes de travail pour éviter des SCC cassés par de simples espaces."""
+    df = df.copy()
+    for col in ["Source", "Target"]:
+        if col in df.columns:
+            df[col] = df[col].map(_norm_entity)
+    if "Role" in df.columns:
+        df["Role"] = df["Role"].apply(lambda v: None if pd.isna(v) else str(v).strip() or None)
+    if "Permission" in df.columns:
+        df["Permission"] = df["Permission"].map(_norm_perm)
+    if "Heritage" in df.columns:
+        df["Heritage"] = df["Heritage"].apply(lambda v: None if pd.isna(v) else str(v).strip() or None)
+    return df
 
 # ================= ALGORITHMES (Tarjan & co) ================
 def tarjan(V, adj):
@@ -84,36 +124,21 @@ def tarjan(V, adj):
             strongconnect(v)
     return scc, component_map
 
-# ---------- Propagation "descendante" sur le DAG de condensation ----------
 def propagate_labels(components, adj, component_map):
-    """
-    Pour chaque composante fortement connexe C, calcule l'ensemble des
-    étiquettes = union de C et de toutes les composantes atteignables depuis C.
-    (propagation aval dans le DAG de condensation)
-    """
-    comp_keys = [frozenset(c) for c in components]
-    key_by_node = {n: frozenset(component_map[n]) for n in component_map}
-
-    # DAG de condensation
-    Gc = nx.DiGraph()
-    Gc.add_nodes_from(comp_keys)
-    for u, outs in adj.items():
-        cu = key_by_node.get(u)
-        if cu is None:
-            continue
-        for v in outs:
-            cv = key_by_node.get(v)
-            if cv is None or cu == cv:
-                continue
-            Gc.add_edge(cu, cv)
-
-    labels = {ck: set(ck) for ck in comp_keys}
-    for ck in reversed(list(nx.topological_sort(Gc))):
-        for succ in Gc.successors(ck):
-            labels[ck].update(labels[succ])
-
+    labels = {frozenset(comp): set(comp) for comp in components}
+    def dfs(node, visited):
+        if node in visited: return
+        visited.add(node)
+        for neighbor in adj.get(node, []):
+            if neighbor in component_map:
+                neighbor_comp = frozenset(component_map[neighbor])
+                current_comp = frozenset(component_map[node])
+                labels[neighbor_comp].update(labels[current_comp])
+                dfs(neighbor, visited)
+    for comp in components:
+        for node in comp:
+            dfs(node, set())
     return [labels[frozenset(comp)] for comp in components]
-# ------------------------------------------------------------------------
 
 def simplify_relations(labels):
     reduced = nx.DiGraph()
@@ -136,43 +161,33 @@ def simplify_relations(labels):
 # =============== CONSTRUCTION DE L’ADJACENCE =================
 def apply_permissions(df_effective: pd.DataFrame):
     """
-    Si entities_mode=True (fichier Entités E1,E2):
-        on garde l’orientation telle quelle: Source -> Target (quel que soit R/W)
-    Sinon (RBAC):
-        R : O -> S
-        W : S -> O
+    Adjacence **uniquement** depuis les lignes R/W.
+    Aucune prise en compte de Owner/None.
     """
     adj = {}
     def add_edge(a, b):
-        if pd.isna(a) or pd.isna(b): 
+        if a is None or b is None: 
             return
         adj.setdefault(a, []); adj.setdefault(b, [])
         adj[a].append(b)
-
-    entities_mode = bool(st.session_state.get("entities_mode", False))
-
     for _, row in df_effective.iterrows():
         s, p, t = row.get("Source"), row.get("Permission"), row.get("Target")
-
-        if entities_mode:
-            # Mode Entités: on ne ré-interprète pas; on trace s -> t
-            add_edge(s, t)
-        else:
-            # Mode RBAC
-            if p == "R":
-                add_edge(t, s)  # lecture: O -> S
-            elif p == "W":
-                add_edge(s, t)  # écriture: S -> O
-
+        if p == "R":
+            add_edge(t, s)  # lecture: O -> S
+        elif p == "W":
+            add_edge(s, t)  # écriture: S -> O
     for k in list(adj.keys()):
         adj[k] = sorted(set(adj[k]))
     return adj
 
 # =============== UTILITAIRES TABLES =========================
+def _fmt_set(ss: set[str]) -> str:
+    return "{" + ", ".join(sorted(ss)) + "}"
+
 def display_entities_table(components, labels):
     data = {
         "Entities": [", ".join(sorted(c)) for c in components],
-        "Their labels": ["{" + ", ".join(sorted(lbl | set(comp))) + "}" for comp, lbl in zip(components, labels)],
+        "Their labels": [_fmt_set(lbl | set(comp)) for comp, lbl in zip(components, labels)],
         "Nombre d'étiquettes": [len(lbl) for lbl in labels],
     }
     df = pd.DataFrame(data).sort_values(by="Nombre d'étiquettes", ascending=False).drop(columns=["Nombre d'étiquettes"])
@@ -216,7 +231,7 @@ def draw_main_graph(df: pd.DataFrame):
         st.info("Aucune donnée pour générer le graphe.")
         return
 
-    # uniquement R/W (étiquette placeholder pour Entités aussi)
+    # uniquement R/W
     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
     if df_eff.empty:
         st.info("Aucune relation R/W à afficher.")
@@ -230,7 +245,6 @@ def draw_main_graph(df: pd.DataFrame):
         for v in vs:
             G_adj.add_edge(u, v)
     scc = list(nx.strongly_connected_components(G_adj))
-    # du plus petit en haut au plus grand en bas
     scc_sorted = sorted(scc, key=len)
 
     # positions grille
@@ -249,7 +263,7 @@ def draw_main_graph(df: pd.DataFrame):
     # nœuds
     all_nodes = set(adj.keys()) | {v for lst in adj.values() for v in lst}
     for n in sorted(all_nodes):
-        shape = "ellipse" if isinstance(n, str) and str(n).startswith("S") else "box"
+        shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
         x, y = node_pos.get(n, (0, 0))
         net.add_node(n, label=n, shape=shape, color="lightblue", x=x, y=y)
 
@@ -271,7 +285,7 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
     net = Network(notebook=False, height="750px", width="100%", directed=True, cdn_resources="in_line")
 
     for n in sorted(component_nodes):
-        shape = "ellipse" if str(n).startswith("S") else "box"
+        shape = "ellipse" if n.startswith("S") else "box"
         net.add_node(n, label=n, shape=shape, color="lightcoral")
 
     for s, dests in adj.items():
@@ -284,119 +298,136 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
 # =============== SECTION « TABLE + GRAPHE COMBINÉ » =========
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
-    # n’afficher que les nœuds présents sur des arêtes
-    edge_nodes = set(adj_1.keys()) | {v for lst in adj_1.values() for v in lst}
-    allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("S")}
-    allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("O")}
-    allowed_others   = edge_nodes - allowed_subjects - allowed_objects
+    """
+    Affiche à gauche les entités (S/O ou 'E*' en mode Entités) groupées par composantes fortement connexes (SCC),
+    au centre les arêtes R/W épurées (réduction transitive si DAG),
+    et en bas les classes d'équivalence (labels) + relations simplifiées.
+    - Corrigé: fonctionne aussi quand il n'y a pas de notion S/O (fichier 'Entités').
+    - Corrigé: aucune exclusion de composant à cause d'espaces/variantes — on s'appuie
+      sur la liste des composants calculés (components_1) plutôt que sur un filtre strict d'adjacence.
+    """
 
-    # Conserver le couplage composante/labels pour éviter tout décalage
-    pairs1 = [(c, l) for c, l in zip(components_1, labels_1)]
-    pairs2 = [(c, l) for c, l in zip(components_2, labels_2)]
+    # --- Détection du mode (RBAC vs Entités simples)
+    all_nodes_c1 = set().union(*[set(c) for c in components_1]) if components_1 else set()
+    looks_like_rbac = any(isinstance(n, str) and (n.startswith("S") or n.startswith("O")) for n in all_nodes_c1)
 
-    def comp_has_allowed(c):
-        if allowed_subjects or allowed_objects:
-            return any((n in allowed_subjects or n in allowed_objects) for n in c)
-        else:
-            return any((n in edge_nodes) for n in c)
+    # Nœuds autorisés pour l'affichage haut (ne PAS filtrer par adj pour ne pas casser les SCC)
+    if looks_like_rbac:
+        allowed_subjects = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("S")}
+        allowed_objects  = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("O")}
+    else:
+        # mode Entités: tout va à gauche, pas de séparation S/O
+        allowed_subjects = set(all_nodes_c1)
+        allowed_objects  = set()
 
-    pairs1 = [(c, l) for (c, l) in pairs1 if comp_has_allowed(c)]
-    pairs2 = [(c, l) for (c, l) in pairs2 if comp_has_allowed(c)]
+    # Conserver l'alignement composants <-> labels
+    sorted_components_1 = sorted(components_1, key=len, reverse=True)
+    labels_1_sorted     = [lbl for _, lbl in sorted(zip(components_1, labels_1), key=lambda t: len(t[0]), reverse=True)]
 
-    # Tri par taille décroissante
-    pairs1.sort(key=lambda cl: len(cl[0]), reverse=True)
-    pairs2.sort(key=lambda cl: len(cl[0]), reverse=True)
-
-    x_gap, y_gap = 300, 250
-    cur_y_S = 0; cur_y_O = 0; cur_y_X = 0
+    # Placement
+    x_gap, y_gap = 320, 240
+    cur_y_left = 0
+    cur_y_right = 0
     node_indices = {}
     G1 = nx.DiGraph()
     role_to_subject = {s: role_data.get(s, "No role") for s in allowed_subjects}
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
 
-    # --- Haut : entités (S*, O*, autres) avec leurs labels ---
-    for component, label in pairs1:
-        subjects = [s for s in component if isinstance(s, str) and s.startswith("S") and s in edge_nodes]
-        objects  = [o for o in component if isinstance(o, str) and o.startswith("O") and o in edge_nodes]
-        others   = [x for x in component if (x not in subjects and x not in objects) and x in edge_nodes]
+    # ----- NŒUDS HAUT (par SCC) -----
+    for component, label in zip(sorted_components_1, labels_1_sorted):
+        # RBAC: sujets à gauche, objets à droite
+        if looks_like_rbac:
+            subjects = [s for s in component if s in allowed_subjects]
+            objects  = [o for o in component if o in allowed_objects]
+            for subj in subjects:
+                roles = role_to_subject.get(subj, "No role")
+                combined = _fmt_set(label | {subj})
+                text = f'{subj}({roles}):\n{combined}'
+                net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-cur_y_left*y_gap)
+                node_indices[subj] = subj
+                cur_y_left += 1
+            for obj in objects:
+                combined = _fmt_set(label | {obj})
+                net.add_node(obj, label=f'{obj}:\n{combined}', shape='box', x=x_gap, y=-cur_y_right*y_gap)
+                node_indices[obj] = obj
+                cur_y_right += 1
+        else:
+            # ENTITÉS: tout à gauche, forme 'box'
+            for ent in sorted(component):
+                combined = _fmt_set(label | {ent})
+                net.add_node(ent, label=f'{ent}:\n{combined}', shape='box', x=-x_gap, y=-cur_y_left*y_gap)
+                node_indices[ent] = ent
+                cur_y_left += 1
 
-        for subj in sorted(subjects):
-            roles = role_to_subject.get(subj, "No role")
-            combined = '{' + ', '.join(sorted(label | {subj})) + '}'
-            text = f'{subj}({roles}):\n{combined}'
-            net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-cur_y_S*y_gap)
-            node_indices[subj] = subj
-            cur_y_S += 1
-
-        for obj in sorted(objects):
-            combined = '{' + ', '.join(sorted(label | {obj})) + '}'
-            net.add_node(obj, label=f'{obj}:\n{combined}', shape='box', x=x_gap, y=-cur_y_O*y_gap)
-            node_indices[obj] = obj
-            cur_y_O += 1
-
-        for x in sorted(others):
-            combined = '{' + ', '.join(sorted(label | {x})) + '}'
-            net.add_node(x, label=f'{x}:\n{combined}', shape='circle', x=0, y=-cur_y_X*y_gap)
-            node_indices[x] = x
-            cur_y_X += 1
-
-    # Arêtes entre entités (réduction transitive si DAG)
+    # ----- ARÊTES DU HAUT -----
     for src, dests in adj_1.items():
         for dest in dests:
             if src in node_indices and dest in node_indices:
                 G1.add_edge(src, dest)
+
+    # Réduction transitive si DAG
     if nx.is_directed_acyclic_graph(G1):
         G1 = nx.transitive_reduction(G1)
     for s, d in G1.edges():
         net.add_edge(s, d, arrows="to")
 
-    # --- Bas : classes d'équivalence (une seule boîte par ensemble d'étiquettes) ---
-    class_entities = {}
-    for comp, lab in pairs2:
-        key = frozenset(lab)
-        class_entities.setdefault(key, set()).update(comp)
-
-    unique_label_sets = list(class_entities.keys())
-    unique_label_sets.sort(key=lambda s: (len(s), sorted(s)))
-
-    simplified_edges_unique = simplify_relations(unique_label_sets)
-
+    # ----- BLOCS DU BAS (classes d'équivalence) -----
+    # grille 3 colonnes
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
-    idx_by_labelset = {}
 
-    for i, labset in enumerate(unique_label_sets):
-        entities_text = ', '.join(sorted(class_entities[labset]))
-        combined = '{' + ', '.join(sorted(set(labset) | class_entities[labset])) + '}'
-        text = f'| {entities_text}: {combined} |'
-        col = i % 3; row = i // 3
-        x, y = positions[col]; y += row * offset_y
-        node_id = base_idx + i
-        net.add_node(node_id, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
-        idx_by_labelset[frozenset(labset)] = node_id
+    # Conserver l'alignement pour components_2/labels_2
+    sorted_components_2 = sorted(components_2, key=len, reverse=True)
+    labels_2_sorted     = [lbl for _, lbl in sorted(zip(components_2, labels_2), key=lambda t: len(t[0]), reverse=True)]
 
-    for src_set, dest_set in simplified_edges_unique:
-        si = idx_by_labelset.get(frozenset(src_set))
-        di = idx_by_labelset.get(frozenset(dest_set))
+    def comp_allowed(c):
+        # RBAC: on n'affiche les classes que si elles contiennent au moins un nœud connu
+        return any(n in all_nodes_c1 for n in c) if looks_like_rbac else True
+
+    for i, (component, label) in enumerate(zip(sorted_components_2, labels_2_sorted)):
+        if not comp_allowed(component):
+            continue
+        entity_name = ', '.join(component)
+        combined = _fmt_set(label | set(component))
+        text = f'| {entity_name}: {combined} |'
+        col = i % 3
+        row = i // 3
+        x, y = positions[col]
+        y += row * offset_y
+        net.add_node(base_idx + i, label=text, shape='box', x=x, y=y,
+                     width_constraint=320, height_constraint=110)
+
+    # relier les classes par relations simplifiées
+    # (on retrouve leur index après tri en comparant les ensembles)
+    def index_in_sorted(target_set):
+        for idx, lbl in enumerate(labels_2_sorted):
+            if lbl == target_set:
+                return idx
+        return None
+
+    for src_set, dest_set in simplified_edges_2:
+        si = index_in_sorted(src_set)
+        di = index_in_sorted(dest_set)
         if si is not None and di is not None:
-            net.add_edge(si, di, arrows="to")
+            net.add_edge(base_idx + si, base_idx + di, arrows="to")
 
     _pyvis_show(net, height=1000, width=1800)
 
 # =============== PROPAGATION RBAC (fichiers) =================
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
+    # IMPORTANT: normaliser AVANT tout calcul pour éviter des doublons (' S1' vs 'S1')
+    df = normalize_df(df)
     if "Role" not in df.columns: df["Role"] = None
     if "Heritage" not in df.columns: df["Heritage"] = None
 
     role_perms, subject_roles = {}, {}
     for _, row in df.iterrows():
-        role = str(row.get("Role", "")).strip()
-        subj = str(row.get("Source", "")).strip()
-        perm = str(row.get("Permission", "")).strip()
-        obj  = str(row.get("Target", "")).strip()
+        role = row.get("Role")
+        subj = row.get("Source")
+        perm = row.get("Permission")
+        obj  = row.get("Target")
         if role:
             subject_roles.setdefault(subj, set()).add(role)
         if role and perm and obj:
@@ -412,14 +443,10 @@ def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
                     new_rows.append({"Source": subj, "Permission": perm, "Target": obj, "Role": r, "Heritage": "Role"})
     if new_rows:
         df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
-    return df
+    return normalize_df(df)
 
 # =============== CHARGEMENT ENTITÉS (E1,E2) =================
 def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
-    """
-    Lecture d'un fichier Entités (Entity1, Entity2).
-    On produit des lignes (Source=Entity1, Target=Entity2, Permission='R').
-    """
     df_raw = pd.read_excel(io.BytesIO(file_bytes))
     cols = {c.strip().lower(): c for c in df_raw.columns}
     if not {"entity1", "entity2"} <= set(cols.keys()):
@@ -427,14 +454,14 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
     col_e1, col_e2 = cols["entity1"], cols["entity2"]
     rows = []
     for _, row in df_raw.iterrows():
-        e1 = str(row[col_e1]).strip()
-        e2 = str(row[col_e2]).strip()
-        if e1 and e1.lower() != "nan" and e2 and e2.lower() != "nan":
-            # IMPORTANT: dans le mode Entités on veut E1 -> E2
-            rows.append({"Source": e1, "Permission": "R", "Target": e2, "Role": None, "Heritage": None})
+        e1 = _norm_entity(row[col_e1])
+        e2 = _norm_entity(row[col_e2])
+        if e1 and e2:
+            # convention: E2 lit E1 -> arête E1 -> E2 (comme Permission=R)
+            rows.append({"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None})
     if not rows:
         raise ValueError("Aucune paire valide (Entity1, Entity2) trouvée.")
-    return pd.DataFrame(rows, columns=["Source", "Permission", "Target", "Role", "Heritage"])
+    return normalize_df(pd.DataFrame(rows, columns=["Source", "Permission", "Target", "Role", "Heritage"]))
 
 # =============== PERF (Tarjan vs Propagation) ===============
 def evaluer_performance_interface(nb_entites: int):
@@ -481,12 +508,14 @@ def process_data_display(df: pd.DataFrame):
         st.info("Aucune donnée à afficher.")
         return
 
+    # Normalisation & propagation (RBAC)
     df_expanded = propagate_rbac_from_excel(df)
     df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
     if df_effective.empty:
         st.info("Aucune relation R/W à afficher.")
         return
 
+    # Adjacence & SCC
     adj = apply_permissions(df_effective)
     active_nodes = set(adj.keys())
     for lst in adj.values(): active_nodes.update(lst)
@@ -527,7 +556,7 @@ def process_data_display(df: pd.DataFrame):
     if st.session_state.selected_component is not None:
         st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
-        if st.button("↩️ Revenir au graphe principal", key="back_main_graph"):
+        if st.button("↩️ Revenir au graphe principal", key="back_to_main_graph"):
             st.session_state.selected_component = None
 
 # =============== TERMINAL : COMMANDES ======================
@@ -558,7 +587,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
 
     # -------- RBAC OBJ simple --------
     if command == "AddObj" and len(args) == 1:
-        obj = args[0]
+        obj = _norm_entity(args[0])
         if obj in st.session_state.objets_definis:
             out.append(f"ℹ️ The object '{obj}' already exists.")
             return df, "\n".join(out)
@@ -570,7 +599,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     if command == "AddRole":
         if len(args)!=1:
             out.append("❌ Usage: AddRole R1"); return df, "\n".join(out)
-        role = args[0]
+        role = args[0].strip()
         if role in st.session_state.roles_definis:
             out.append(f"ℹ️ Role '{role}' already exists."); return df, "\n".join(out)
         st.session_state.roles_definis.add(role)
@@ -580,8 +609,8 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     if command == "AddSub":
         if len(args)<1:
             out.append("❌ Usage: AddSub S1 [R1]"); return df, "\n".join(out)
-        subject = args[0]
-        role = args[1] if len(args)>1 else None
+        subject = _norm_entity(args[0])
+        role = args[1].strip() if len(args)>1 else None
         if subject in st.session_state.sujets_definis:
             out.append(f"ℹ️ The Subject '{subject}' already exists."); return df, "\n".join(out)
         if role and role not in st.session_state.roles_definis:
@@ -601,7 +630,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     if command == "GrantPermission":
         if len(args)!=3:
             out.append("❌ Usage: GrantPermission R1 R O1"); return df, "\n".join(out)
-        role, perm, obj = args
+        role, perm, obj = args[0].strip(), _norm_perm(args[1]), _norm_entity(args[2])
         if role not in st.session_state.roles_definis:
             out.append(f"❌ Role '{role}' is not defined."); return df, "\n".join(out)
         if obj not in st.session_state.objets_definis:
@@ -618,7 +647,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     if command == "RevokePermission":
         if len(args)!=3:
             out.append("❌ Usage: RevokePermission R1 R O1"); return df, "\n".join(out)
-        role, perm, obj = args
+        role, perm, obj = args[0].strip(), _norm_perm(args[1]), _norm_entity(args[2])
         if role not in st.session_state.roles_definis:
             out.append(f"⛔ Error: Role '{role}' does not exist."); return df, "\n".join(out)
         if obj not in st.session_state.objets_definis:
@@ -631,7 +660,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
 
     # -------- DAC --------
     if len(parts)>=3 and parts[1]=="AddObj":
-        owner, obj = parts[0], parts[2]
+        owner, obj = _norm_entity(parts[0]), _norm_entity(parts[2])
         if owner not in st.session_state.sujets_definis:
             out.append(f"⛔ Error: Subject '{owner}' does not exist. Use AddSub first."); return df, "\n".join(out)
         if obj in st.session_state.objets_definis:
@@ -642,7 +671,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         return df, "\n".join(out)
 
     if len(parts)>=5 and parts[1]=="Grant":
-        owner, _, subject, obj, perm = parts[:5]
+        owner, _, subject, obj, perm = _norm_entity(parts[0]), parts[1], _norm_entity(parts[2]), _norm_entity(parts[3]), _norm_perm(parts[4])
         if owner not in st.session_state.sujets_definis:
             out.append(f"⛔ Error: Subject '{owner}' does not exist."); return df, "\n".join(out)
         if subject not in st.session_state.sujets_definis:
@@ -704,7 +733,6 @@ def main():
                 cols_lower = {c.strip().lower() for c in probe.columns}
                 if {"entity1","entity2"} <= cols_lower:
                     df = load_entities_excel(content)
-                    st.session_state.entities_mode = True   # <<< Active le mode Entités
                 else:
                     df = pd.read_excel(io.BytesIO(content))
                     req = {"Source","Permission","Target"}
@@ -712,7 +740,7 @@ def main():
                     if missing: raise ValueError(f"Colonnes manquantes: {missing}")
                     if "Role" not in df.columns: df["Role"] = None
                     if "Heritage" not in df.columns: df["Heritage"] = None
-                    st.session_state.entities_mode = False  # <<< Mode RBAC
+                    df = normalize_df(df)
                 st.session_state.global_data = df
                 st.success("✅ Fichier chargé.")
                 with st.expander("Voir les données chargées"):
