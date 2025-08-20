@@ -666,7 +666,7 @@ def _run_command_callback():
     st.rerun()
 
 def main():
-    st.title("🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires– RBAC / DAC / China-Wall")
+    st.title("🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires– DAC / MAC/ RBAC /ABAC")
 
     tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
 
