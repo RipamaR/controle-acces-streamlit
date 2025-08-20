@@ -83,21 +83,42 @@ def tarjan(V, adj):
             strongconnect(v)
     return scc, component_map
 
+# ---------- CORRECTION ICI : propagation vers les DESCENDANTS ----------
 def propagate_labels(components, adj, component_map):
-    labels = {frozenset(comp): set(comp) for comp in components}
-    def dfs(node, visited):
-        if node in visited: return
-        visited.add(node)
-        for neighbor in adj.get(node, []):
-            if neighbor in component_map:
-                neighbor_comp = frozenset(component_map[neighbor])
-                current_comp = frozenset(component_map[node])
-                labels[neighbor_comp].update(labels[current_comp])
-                dfs(neighbor, visited)
-    for comp in components:
-        for node in comp:
-            dfs(node, set())
+    """
+    Pour chaque composante fortement connexe C, calcule l'ensemble des
+    étiquettes = union de C et de toutes les composantes atteignables depuis C.
+    (propagation "aval" dans le DAG de condensation)
+    """
+    # Clés de composantes
+    comp_keys = [frozenset(c) for c in components]
+    key_by_node = {n: frozenset(component_map[n]) for n in component_map}
+
+    # DAG de condensation : arêtes entre composantes (A->B) s'il existe u in A, v in B, et u->v
+    Gc = nx.DiGraph()
+    Gc.add_nodes_from(comp_keys)
+    for u, outs in adj.items():
+        cu = key_by_node.get(u)
+        if cu is None: 
+            continue
+        for v in outs:
+            cv = key_by_node.get(v)
+            if cv is None or cu == cv:
+                continue
+            Gc.add_edge(cu, cv)
+
+    # Initialisation: chaque label = sa composante elle-même
+    labels = {ck: set(ck) for ck in comp_keys}
+
+    # Propagation du bas vers le haut (descendants -> ancêtres)
+    # On parcourt dans l'ordre topologique inversé pour que les successeurs soient déjà remplis.
+    for ck in reversed(list(nx.topological_sort(Gc))):
+        for succ in Gc.successors(ck):
+            labels[ck].update(labels[succ])
+
+    # Restituer dans l'ordre original des composantes
     return [labels[frozenset(comp)] for comp in components]
+# -----------------------------------------------------------------------
 
 def simplify_relations(labels):
     reduced = nx.DiGraph()
@@ -251,24 +272,13 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
 # =============== SECTION « TABLE + GRAPHE COMBINÉ » =========
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
-    """
-    Affiche :
-      - haut/gauche  : sujets S*
-      - haut/droite  : objets O*
-      - haut/centre  : autres entités (fichiers Entités pur)
-      - bas          : classes d'équivalence (UNIQUE par ensemble d'étiquettes)
-    Corrections clés :
-      1) Tri couplé (composante, labels) pour conserver l’appariement.
-      2) Classe d’équivalence = un seul nœud par ensemble d’étiquettes.
-      3) Fallback entités pures (aucun S*/O*).
-    """
-    # nœuds présents sur des arêtes
+    # n’afficher que les nœuds présents sur des arêtes
     edge_nodes = set(adj_1.keys()) | {v for lst in adj_1.values() for v in lst}
     allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("S")}
     allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("O")}
     allowed_others   = edge_nodes - allowed_subjects - allowed_objects
 
-    # Conserver appariement composante/labels (listes de paires)
+    # Conserver l’appariement composante ↔ labels
     pairs1 = list(zip(components_1, labels_1))
     pairs2 = list(zip(components_2, labels_2))
 
@@ -281,11 +291,10 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     pairs1 = [(c, l) for (c, l) in pairs1 if comp_has_allowed(c)]
     pairs2 = [(c, l) for (c, l) in pairs2 if comp_has_allowed(c)]
 
-    # Tri couplé par taille décroissante
+    # Tri par taille décroissante
     pairs1.sort(key=lambda cl: len(cl[0]), reverse=True)
     pairs2.sort(key=lambda cl: len(cl[0]), reverse=True)
 
-    # Préparation du graphe
     x_gap, y_gap = 300, 250
     cur_y_S = 0; cur_y_O = 0; cur_y_X = 0
     node_indices = {}
@@ -294,7 +303,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
 
-    # --- Haut : entités, rangées par composante ---
+    # --- Haut : entités (S*, O*, autres) avec leurs labels ---
     for component, label in pairs1:
         subjects = [s for s in component if isinstance(s, str) and s.startswith("S") and s in edge_nodes]
         objects  = [o for o in component if isinstance(o, str) and o.startswith("O") and o in edge_nodes]
@@ -330,18 +339,15 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     for s, d in G1.edges():
         net.add_edge(s, d, arrows="to")
 
-    # --- Bas : classes d'équivalence (UNIQUE par ensemble d'étiquettes) ---
-    # Construire les classes (label_set -> ensemble d'entités de cette classe)
+    # --- Bas : classes d'équivalence (une seule boîte par ensemble d'étiquettes) ---
     class_entities = {}
     for comp, lab in pairs2:
         key = frozenset(lab)
         class_entities.setdefault(key, set()).update(comp)
 
-    # Liste unique (et triée) des ensembles d'étiquettes
     unique_label_sets = list(class_entities.keys())
-    unique_label_sets.sort(key=lambda s: (len(s), sorted(s)))  # stable
+    unique_label_sets.sort(key=lambda s: (len(s), sorted(s)))
 
-    # Recalcule des arêtes simplifiées sur les classes uniques
     simplified_edges_unique = simplify_relations(unique_label_sets)
 
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
@@ -359,7 +365,6 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         net.add_node(node_id, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
         idx_by_labelset[frozenset(labset)] = node_id
 
-    # Arêtes entre classes (utilise les ensembles d’étiquettes uniques)
     for src_set, dest_set in simplified_edges_unique:
         si = idx_by_labelset.get(frozenset(src_set))
         di = idx_by_labelset.get(frozenset(dest_set))
