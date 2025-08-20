@@ -120,19 +120,13 @@ def tarjan(V, adj):
             strongconnect(v)
     return scc, component_map
 
-# >>>>>> CORRIGÉ : propagation sur le DAG de composantes (condensation) <<<<<<
+# ---- Propagation CORRIGÉE : sur le DAG de composantes (condensation) ----
 def propagate_labels(components, adj, component_map):
-    """
-    Calcule, pour chaque SCC, l'ensemble des étiquettes de tous les
-    *prédecesseurs* atteignant cette SCC (plus elle-même).
-    On travaille sur le graphe *condensé* (DAG) pour éviter toute sur-propagation.
-    """
-    # index des SCC
+    # map SCC -> index
     comp_index = {frozenset(c): i for i, c in enumerate(components)}
-    # labels initial = contenu de la SCC
+    # labels initiaux : contenu de la SCC
     labels = [set(c) for c in components]
-
-    # construire la condensation (DAG des SCC)
+    # construire le DAG des SCC
     Gc = nx.DiGraph()
     Gc.add_nodes_from(range(len(components)))
     for u in component_map:
@@ -143,15 +137,12 @@ def propagate_labels(components, adj, component_map):
             cv = comp_index[frozenset(component_map[v])]
             if cu != cv:
                 Gc.add_edge(cu, cv)
-
-    # ordre topologique et propagation (u -> v  ⇒ labels[v] |= labels[u])
+    # ordre topologique et propagation
     for u in nx.topological_sort(Gc):
         for v in Gc.successors(u):
             labels[v] |= labels[u]
-
-    # renvoyer une liste de sets alignée avec `components`
     return labels
-# ---------------------------------------------------------------------------
+# -------------------------------------------------------------------------
 
 def simplify_relations(labels):
     reduced = nx.DiGraph()
@@ -175,7 +166,7 @@ def simplify_relations(labels):
 def apply_permissions(df_effective: pd.DataFrame):
     adj = {}
     def add_edge(a, b):
-        if a is None or b is None: 
+        if a is None or b is None:
             return
         adj.setdefault(a, []); adj.setdefault(b, [])
         adj[a].append(b)
@@ -467,7 +458,7 @@ def evaluer_performance_interface(nb_entites: int):
     st.pyplot(fig)
 
 # =============== VISUALISATION COMPLÈTE ====================
-def process_data_display(df: pd.DataFrame):
+def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     if df is None or df.empty:
         st.info("Aucune donnée à afficher.")
         return
@@ -484,7 +475,7 @@ def process_data_display(df: pd.DataFrame):
 
     V = sorted(active_nodes)
     scc, cmap = tarjan(V, adj)
-    labels = propagate_labels(scc, adj, cmap)   # ← nouvelle propagation (condensation DAG)
+    labels = propagate_labels(scc, adj, cmap)
     simplified = simplify_relations(labels)
 
     st.subheader("Table des entités et étiquettes")
@@ -511,13 +502,14 @@ def process_data_display(df: pd.DataFrame):
     cols = st.columns(4)
     for i, comp in enumerate(scc):
         label = ", ".join(sorted(comp))
-        if cols[i % 4].button(f"Voir: {label}", key=f"sccbtn_{i}"):
+        # >>> clés uniques par appel
+        if cols[i % 4].button(f"Voir: {label}", key=f"{key_prefix}_sccbtn_{i}"):
             st.session_state.selected_component = i
 
     if st.session_state.selected_component is not None:
         st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
-        if st.button("↩️ Revenir au graphe principal", key="back_to_main_graph"):
+        if st.button("↩️ Revenir au graphe principal", key=f"{key_prefix}_back_to_main_graph"):
             st.session_state.selected_component = None
 
 # =============== TERMINAL : COMMANDES ======================
@@ -657,7 +649,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         return df, "\n".join(out)
 
     if command == "show":
-        process_data_display(df)
+        process_data_display(df, key_prefix="terminal_show")
         out.append("🚀 Génération des graphes…")
         return df, "\n".join(out)
 
@@ -678,6 +670,7 @@ def main():
 
     tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
 
+    # ------- Onglet Excel -------
     with tabs[0]:
         st.write("Charge un fichier **RBAC** (Source, Permission, Target, Role) ou **Entités** (Entity1, Entity2).")
         up = st.file_uploader("Importer un fichier Excel", type=["xlsx"])
@@ -705,8 +698,9 @@ def main():
 
         st.markdown("---")
         st.subheader("Visualisations")
-        process_data_display(st.session_state.global_data)
+        process_data_display(st.session_state.global_data, key_prefix="excel")
 
+    # ------- Onglet Terminal -------
     with tabs[1]:
         st.markdown(
             "Entre une commande puis **Entrée**  \n"
@@ -718,8 +712,9 @@ def main():
 
         st.markdown("---")
         st.subheader("Graphes (issus des commandes)")
-        process_data_display(st.session_state.global_data)
+        process_data_display(st.session_state.global_data, key_prefix="terminal")
 
+    # ------- Onglet Perf -------
     with tabs[2]:
         st.write("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.")
         n = st.slider("Nombre d'entités", 20, 2000, 200, step=20)
