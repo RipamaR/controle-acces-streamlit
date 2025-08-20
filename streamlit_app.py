@@ -38,6 +38,7 @@ def init_state():
         "interdictions_entites": {},
         "history": [],
         "selected_component": None,   # index SCC sélectionné
+        "entities_mode": False,       # <<< NOUVEAU : vrai si fichier Entités
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -83,23 +84,22 @@ def tarjan(V, adj):
             strongconnect(v)
     return scc, component_map
 
-# ---------- CORRECTION ICI : propagation vers les DESCENDANTS ----------
+# ---------- Propagation "descendante" sur le DAG de condensation ----------
 def propagate_labels(components, adj, component_map):
     """
     Pour chaque composante fortement connexe C, calcule l'ensemble des
     étiquettes = union de C et de toutes les composantes atteignables depuis C.
-    (propagation "aval" dans le DAG de condensation)
+    (propagation aval dans le DAG de condensation)
     """
-    # Clés de composantes
     comp_keys = [frozenset(c) for c in components]
     key_by_node = {n: frozenset(component_map[n]) for n in component_map}
 
-    # DAG de condensation : arêtes entre composantes (A->B) s'il existe u in A, v in B, et u->v
+    # DAG de condensation
     Gc = nx.DiGraph()
     Gc.add_nodes_from(comp_keys)
     for u, outs in adj.items():
         cu = key_by_node.get(u)
-        if cu is None: 
+        if cu is None:
             continue
         for v in outs:
             cv = key_by_node.get(v)
@@ -107,18 +107,13 @@ def propagate_labels(components, adj, component_map):
                 continue
             Gc.add_edge(cu, cv)
 
-    # Initialisation: chaque label = sa composante elle-même
     labels = {ck: set(ck) for ck in comp_keys}
-
-    # Propagation du bas vers le haut (descendants -> ancêtres)
-    # On parcourt dans l'ordre topologique inversé pour que les successeurs soient déjà remplis.
     for ck in reversed(list(nx.topological_sort(Gc))):
         for succ in Gc.successors(ck):
             labels[ck].update(labels[succ])
 
-    # Restituer dans l'ordre original des composantes
     return [labels[frozenset(comp)] for comp in components]
-# -----------------------------------------------------------------------
+# ------------------------------------------------------------------------
 
 def simplify_relations(labels):
     reduced = nx.DiGraph()
@@ -141,20 +136,34 @@ def simplify_relations(labels):
 # =============== CONSTRUCTION DE L’ADJACENCE =================
 def apply_permissions(df_effective: pd.DataFrame):
     """
-    Adjacence **uniquement** depuis les lignes R/W.
-    Aucune prise en compte de Owner/None.
+    Si entities_mode=True (fichier Entités E1,E2):
+        on garde l’orientation telle quelle: Source -> Target (quel que soit R/W)
+    Sinon (RBAC):
+        R : O -> S
+        W : S -> O
     """
     adj = {}
     def add_edge(a, b):
-        if pd.isna(a) or pd.isna(b): return
+        if pd.isna(a) or pd.isna(b): 
+            return
         adj.setdefault(a, []); adj.setdefault(b, [])
         adj[a].append(b)
+
+    entities_mode = bool(st.session_state.get("entities_mode", False))
+
     for _, row in df_effective.iterrows():
         s, p, t = row.get("Source"), row.get("Permission"), row.get("Target")
-        if p == "R":
-            add_edge(t, s)  # lecture: O -> S
-        elif p == "W":
-            add_edge(s, t)  # écriture: S -> O
+
+        if entities_mode:
+            # Mode Entités: on ne ré-interprète pas; on trace s -> t
+            add_edge(s, t)
+        else:
+            # Mode RBAC
+            if p == "R":
+                add_edge(t, s)  # lecture: O -> S
+            elif p == "W":
+                add_edge(s, t)  # écriture: S -> O
+
     for k in list(adj.keys()):
         adj[k] = sorted(set(adj[k]))
     return adj
@@ -207,7 +216,7 @@ def draw_main_graph(df: pd.DataFrame):
         st.info("Aucune donnée pour générer le graphe.")
         return
 
-    # uniquement R/W
+    # uniquement R/W (étiquette placeholder pour Entités aussi)
     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
     if df_eff.empty:
         st.info("Aucune relation R/W à afficher.")
@@ -221,6 +230,7 @@ def draw_main_graph(df: pd.DataFrame):
         for v in vs:
             G_adj.add_edge(u, v)
     scc = list(nx.strongly_connected_components(G_adj))
+    # du plus petit en haut au plus grand en bas
     scc_sorted = sorted(scc, key=len)
 
     # positions grille
@@ -236,12 +246,14 @@ def draw_main_graph(df: pd.DataFrame):
         current_y += y_step
 
     net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
+    # nœuds
     all_nodes = set(adj.keys()) | {v for lst in adj.values() for v in lst}
     for n in sorted(all_nodes):
-        shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
+        shape = "ellipse" if isinstance(n, str) and str(n).startswith("S") else "box"
         x, y = node_pos.get(n, (0, 0))
         net.add_node(n, label=n, shape=shape, color="lightblue", x=x, y=y)
 
+    # arêtes
     for src, dests in adj.items():
         for d in dests:
             net.add_edge(src, d, arrows="to")
@@ -278,15 +290,15 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("O")}
     allowed_others   = edge_nodes - allowed_subjects - allowed_objects
 
-    # Conserver l’appariement composante ↔ labels
-    pairs1 = list(zip(components_1, labels_1))
-    pairs2 = list(zip(components_2, labels_2))
+    # Conserver le couplage composante/labels pour éviter tout décalage
+    pairs1 = [(c, l) for c, l in zip(components_1, labels_1)]
+    pairs2 = [(c, l) for c, l in zip(components_2, labels_2)]
 
-    def comp_has_allowed(comp):
+    def comp_has_allowed(c):
         if allowed_subjects or allowed_objects:
-            return any((n in allowed_subjects or n in allowed_objects) for n in comp)
+            return any((n in allowed_subjects or n in allowed_objects) for n in c)
         else:
-            return any((n in edge_nodes) for n in comp)
+            return any((n in edge_nodes) for n in c)
 
     pairs1 = [(c, l) for (c, l) in pairs1 if comp_has_allowed(c)]
     pairs2 = [(c, l) for (c, l) in pairs2 if comp_has_allowed(c)]
@@ -404,6 +416,10 @@ def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
 
 # =============== CHARGEMENT ENTITÉS (E1,E2) =================
 def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
+    """
+    Lecture d'un fichier Entités (Entity1, Entity2).
+    On produit des lignes (Source=Entity1, Target=Entity2, Permission='R').
+    """
     df_raw = pd.read_excel(io.BytesIO(file_bytes))
     cols = {c.strip().lower(): c for c in df_raw.columns}
     if not {"entity1", "entity2"} <= set(cols.keys()):
@@ -414,13 +430,15 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
         e1 = str(row[col_e1]).strip()
         e2 = str(row[col_e2]).strip()
         if e1 and e1.lower() != "nan" and e2 and e2.lower() != "nan":
-            rows.append({"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None})
+            # IMPORTANT: dans le mode Entités on veut E1 -> E2
+            rows.append({"Source": e1, "Permission": "R", "Target": e2, "Role": None, "Heritage": None})
     if not rows:
         raise ValueError("Aucune paire valide (Entity1, Entity2) trouvée.")
     return pd.DataFrame(rows, columns=["Source", "Permission", "Target", "Role", "Heritage"])
 
 # =============== PERF (Tarjan vs Propagation) ===============
 def evaluer_performance_interface(nb_entites: int):
+    # graphe aléatoire très épars
     G = nx.DiGraph()
     G.add_nodes_from([f"E{i}" for i in range(nb_entites)])
     for i in range(nb_entites):
@@ -686,6 +704,7 @@ def main():
                 cols_lower = {c.strip().lower() for c in probe.columns}
                 if {"entity1","entity2"} <= cols_lower:
                     df = load_entities_excel(content)
+                    st.session_state.entities_mode = True   # <<< Active le mode Entités
                 else:
                     df = pd.read_excel(io.BytesIO(content))
                     req = {"Source","Permission","Target"}
@@ -693,6 +712,7 @@ def main():
                     if missing: raise ValueError(f"Colonnes manquantes: {missing}")
                     if "Role" not in df.columns: df["Role"] = None
                     if "Heritage" not in df.columns: df["Heritage"] = None
+                    st.session_state.entities_mode = False  # <<< Mode RBAC
                 st.session_state.global_data = df
                 st.success("✅ Fichier chargé.")
                 with st.expander("Voir les données chargées"):
