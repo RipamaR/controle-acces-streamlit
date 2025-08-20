@@ -467,7 +467,7 @@ def evaluer_performance_interface(nb_entites: int):
     st.pyplot(fig)
 
 # =============== VISUALISATION COMPLÈTE ====================
-def process_data_display(df: pd.DataFrame):
+def process_data_display(df: pd.DataFrame, key_prefix: str = ""):
     if df is None or df.empty:
         st.info("Aucune donnée à afficher.")
         return
@@ -512,10 +512,14 @@ def process_data_display(df: pd.DataFrame):
     cols = st.columns(4)
     for i, comp in enumerate(scc):
         label = ", ".join(sorted(comp))
-        if cols[i % 4].button(f"Voir: {label}", key=f"sccbtn_{i}"):
+        if cols[i % 4].button(f"Voir: {label}", key=f"{key_prefix}sccbtn_{i}"):
             st.session_state.selected_component = i
 
-   
+    if st.session_state.selected_component is not None:
+        st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
+        draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
+        if st.button("↩️ Revenir au graphe principal", key=f"{key_prefix}back_main"):
+            st.session_state.selected_component = None
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
@@ -678,7 +682,7 @@ def _run_command_callback():
 def main():
     st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
 
-    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal"])
+    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
@@ -707,7 +711,7 @@ def main():
 
         st.markdown("---")
         st.subheader("Visualisations")
-        process_data_display(st.session_state.global_data)
+        process_data_display(st.session_state.global_data, key_prefix="excel_")
 
     # ------- Onglet Terminal -------
     with tabs[1]:
@@ -721,9 +725,14 @@ def main():
 
         st.markdown("---")
         st.subheader("Graphes (issus des commandes)")
-        process_data_display(st.session_state.global_data)
+        process_data_display(st.session_state.global_data, key_prefix="term_")
 
-
+    # ------- Onglet Perf -------
+    with tabs[2]:
+        st.write("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.")
+        n = st.slider("Nombre d'entités", 20, 2000, 200, step=20)
+        if st.button("Lancer EvalPerf"):
+            evaluer_performance_interface(n)
 
 if __name__ == "__main__":
     main()
