@@ -241,7 +241,7 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
     net = Network(notebook=False, height="750px", width="100%", directed=True, cdn_resources="in_line")
 
     for n in sorted(component_nodes):
-        shape = "ellipse" if n.startswith("S") else "box"
+        shape = "ellipse" if str(n).startswith("S") else "box"
         net.add_node(n, label=n, shape=shape, color="lightcoral")
 
     for s, dests in adj.items():
@@ -255,129 +255,111 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
     """
-    Correction : conservation stricte des paires (composante, étiquette) après filtrage/tri
-    + mapping fiable des arêtes de classes d'équivalence.
-    Toujours compatible RBAC (S*/O*) et entités pures.
+    Affiche:
+      - à gauche : sujets S*
+      - à droite : objets O*
+      - au centre : autres entités (si fichier entités sans S*/O*)
+      - en bas   : boîtes de classes d'équivalence (labels) + arêtes simplifiées
+    Corrections :
+      1) tri couplé (composantes, labels) pour conserver l’appariement correct
+      2) fallback entités pures (aucun S*/O* -> on affiche quand même les nœuds)
     """
-
-    # Nœuds réellement impliqués dans des arêtes
+    # nœuds présents sur des arêtes
     edge_nodes = set(adj_1.keys()) | {v for lst in adj_1.values() for v in lst}
+    allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("S")}
+    allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("O")}
+    # autres (pour fichiers Entités)
+    allowed_others   = edge_nodes - allowed_subjects - allowed_objects
 
-    # Détecter si le dataset utilise des préfixes S*/O*
-    has_SO = any(isinstance(n, str) and (str(n).startswith("S") or str(n).startswith("O")) for n in edge_nodes)
+    # Conserver l'appariement composante <-> labels
+    pairs1 = list(zip(components_1, labels_1))
+    pairs2 = list(zip(components_2, labels_2))
 
-    # Helpers de filtrage
-    if has_SO:
-        allowed_subjects = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("S")}
-        allowed_objects  = {n for n in edge_nodes if isinstance(n, str) and str(n).startswith("O")}
-        def comp_has_allowed(c):
-            return any((n in allowed_subjects or n in allowed_objects) for n in c)
-    else:
-        allowed_entities = set(map(str, edge_nodes))
-        def comp_has_allowed(c):
-            return any(str(n) in allowed_entities for n in c)
+    def comp_has_allowed(comp):
+        # S'il y a des S/O, on filtre par S/O ; sinon, on laisse passer toute
+        # composante qui a au moins un nœud actif (cas "entités pures")
+        if allowed_subjects or allowed_objects:
+            return any((n in allowed_subjects or n in allowed_objects) for n in comp)
+        else:
+            return any((n in edge_nodes) for n in comp)
 
-    # ---- Construire des paires cohérentes (composante, étiquette) ----
-    # Haut (entités/S-O)
-    pairs_top = [(tuple(map(str, comp)), set(map(str, lbl)))
-                 for comp, lbl in zip(components_1, labels_1) if comp_has_allowed(comp)]
-    # Tri stable par taille décroissante de composante
-    pairs_top.sort(key=lambda x: len(x[0]), reverse=True)
+    pairs1 = [(c, l) for (c, l) in pairs1 if comp_has_allowed(c)]
+    pairs2 = [(c, l) for (c, l) in pairs2 if comp_has_allowed(c)]
 
-    # Bas (classes d'équivalence)
-    pairs_bottom = [(tuple(map(str, comp)), set(map(str, lbl)))
-                    for comp, lbl in zip(components_2, labels_2) if comp_has_allowed(comp)]
-    pairs_bottom.sort(key=lambda x: len(x[0]), reverse=True)
+    # Tri couplé par taille décroissante de la composante
+    pairs1.sort(key=lambda cl: len(cl[0]), reverse=True)
+    pairs2.sort(key=lambda cl: len(cl[0]), reverse=True)
 
-    # ---- Placement & rendu ----
+    # Préparation du graphe
     x_gap, y_gap = 300, 250
-    cur_y_left = 0
-    cur_y_right = 0
+    cur_y_S = 0; cur_y_O = 0; cur_y_X = 0   # X : autres entités (centre)
     node_indices = {}
     G1 = nx.DiGraph()
-
-    # Rôles (visibles pour S* uniquement)
-    role_to_subject = {str(s): role_data.get(s, "No role") for s in edge_nodes}
+    role_to_subject = {s: role_data.get(s, "No role") for s in allowed_subjects}
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
 
-    def node_shape(n: str):
-        if has_SO:
-            return 'ellipse' if n.startswith("S") else 'box'
-        return 'box'
+    # --- Colonnes du haut (entités par composante) ---
+    for component, label in pairs1:
+        # Séparer S / O / autres
+        subjects = [s for s in component if isinstance(s, str) and s.startswith("S") and s in edge_nodes]
+        objects  = [o for o in component if isinstance(o, str) and o.startswith("O") and o in edge_nodes]
+        others   = [x for x in component if x not in subjects and x not in objects and x in edge_nodes]
 
-    def subj_roles_text(n: str):
-        if has_SO and n.startswith("S"):
-            return role_to_subject.get(n, "No role")
-        return "No role"
+        for subj in sorted(subjects):
+            roles = role_to_subject.get(subj, "No role")
+            combined = '{' + ', '.join(sorted(label | {subj})) + '}'
+            text = f'{subj}({roles}):\n{combined}'
+            net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-cur_y_S*y_gap)
+            node_indices[subj] = subj
+            cur_y_S += 1
 
-    # ===== Haut : entités (ou S/O) groupées par SCC avec leurs étiquettes =====
-    for comp_nodes, label in pairs_top:
-        used = [n for n in comp_nodes if (str(n) in map(str, edge_nodes))]
-        if not used:
-            continue
+        for obj in sorted(objects):
+            combined = '{' + ', '.join(sorted(label | {obj})) + '}'
+            net.add_node(obj, label=f'{obj}:\n{combined}', shape='box', x=x_gap, y=-cur_y_O*y_gap)
+            node_indices[obj] = obj
+            cur_y_O += 1
 
-        if has_SO:
-            left_nodes  = [n for n in used if n.startswith("S")]
-            right_nodes = [n for n in used if n.startswith("O")]
-        else:
-            # Split visuel pour entités pures
-            used_sorted = sorted(used)
-            half = max(1, len(used_sorted) // 2)
-            left_nodes, right_nodes = used_sorted[:half], used_sorted[half:]
+        # Si fichiers "entités" sans S*/O*, on affiche au centre
+        for x in sorted(others):
+            combined = '{' + ', '.join(sorted(label | {x})) + '}'
+            net.add_node(x, label=f'{x}:\n{combined}', shape='circle', x=0, y=-cur_y_X*y_gap)
+            node_indices[x] = x
+            cur_y_X += 1
 
-        for n in left_nodes:
-            roles = subj_roles_text(n)
-            combined = '{' + ', '.join(sorted(label | {n})) + '}'
-            text = f'{n}({roles}):\n{combined}' if (has_SO and n.startswith("S")) else f'{n}:\n{combined}'
-            net.add_node(n, label=text, shape=node_shape(n), x=-x_gap, y=-cur_y_left*y_gap)
-            node_indices[n] = n
-            cur_y_left += 1
-
-        for n in right_nodes:
-            combined = '{' + ', '.join(sorted(label | {n})) + '}'
-            net.add_node(n, label=f'{n}:\n{combined}', shape=node_shape(n), x=x_gap, y=-cur_y_right*y_gap)
-            node_indices[n] = n
-            cur_y_right += 1
-
-    # ===== Arêtes entre nœuds du haut (réduction transitive si DAG) =====
+    # Arêtes entre entités (réduction transitive si DAG)
     for src, dests in adj_1.items():
-        s = str(src)
-        for d0 in dests:
-            d = str(d0)
-            if s in node_indices and d in node_indices:
-                G1.add_edge(s, d)
+        for dest in dests:
+            if src in node_indices and dest in node_indices:
+                G1.add_edge(src, dest)
 
     if nx.is_directed_acyclic_graph(G1):
         G1 = nx.transitive_reduction(G1)
     for s, d in G1.edges():
         net.add_edge(s, d, arrows="to")
 
-    # ===== Bas : boîtes « classes d'équivalence » + arêtes simplifiées =====
+    # --- Boîtes du bas (classes d'équivalence) ---
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
 
-    # Index fiable par contenu d'étiquette (clé = frozenset de strings)
-    label_to_idx = {}
+    # Indexer par ensemble d'étiquettes pour faire correspondre les arêtes simplifiées
+    idx_by_labelset = {}
 
-    for i, (comp_nodes, label) in enumerate(pairs_bottom):
-        entity_name = ', '.join(comp_nodes)
-        combined = '{' + ', '.join(sorted(label | set(comp_nodes))) + '}'
+    for i, (component, label) in enumerate(pairs2):
+        entity_name = ', '.join(sorted(component))
+        combined = '{' + ', '.join(sorted(label | set(component))) + '}'
         text = f'| {entity_name}: {combined} |'
         col = i % 3; row = i // 3
-        x, y = positions[col]; y += row*offset_y
+        x, y = positions[col]; y += row * offset_y
         node_id = base_idx + i
-        net.add_node(node_id, label=text, shape='box', x=x, y=y,
-                     width_constraint=300, height_constraint=100)
-        label_to_idx[frozenset(label)] = node_id
+        net.add_node(node_id, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
+        idx_by_labelset[frozenset(label)] = node_id
 
-    # Arêtes de classes d’équivalence : utiliser le mapping label_to_idx
+    # Arêtes simplifiées entre classes (à partir des ensembles d'étiquettes)
     for src_set, dest_set in simplified_edges_2:
-        src_key = frozenset(map(str, src_set))
-        dst_key = frozenset(map(str, dest_set))
-        si = label_to_idx.get(src_key)
-        di = label_to_idx.get(dst_key)
+        si = idx_by_labelset.get(frozenset(src_set))
+        di = idx_by_labelset.get(frozenset(dest_set))
         if si is not None and di is not None:
             net.add_edge(si, di, arrows="to")
 
@@ -469,7 +451,7 @@ def evaluer_performance_interface(nb_entites: int):
     st.pyplot(fig)
 
 # =============== VISUALISATION COMPLÈTE ====================
-def process_data_display(df: pd.DataFrame, key_prefix: str = ""):
+def process_data_display(df: pd.DataFrame):
     if df is None or df.empty:
         st.info("Aucune donnée à afficher.")
         return
@@ -514,13 +496,13 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = ""):
     cols = st.columns(4)
     for i, comp in enumerate(scc):
         label = ", ".join(sorted(comp))
-        if cols[i % 4].button(f"Voir: {label}", key=f"{key_prefix}sccbtn_{i}"):
+        if cols[i % 4].button(f"Voir: {label}", key=f"sccbtn_{i}"):
             st.session_state.selected_component = i
 
     if st.session_state.selected_component is not None:
         st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
-        if st.button("↩️ Revenir au graphe principal", key=f"{key_prefix}back_main"):
+        if st.button("↩️ Revenir au graphe principal", key="back_main_graph"):
             st.session_state.selected_component = None
 
 # =============== TERMINAL : COMMANDES ======================
@@ -713,7 +695,7 @@ def main():
 
         st.markdown("---")
         st.subheader("Visualisations")
-        process_data_display(st.session_state.global_data, key_prefix="excel_")
+        process_data_display(st.session_state.global_data)
 
     # ------- Onglet Terminal -------
     with tabs[1]:
@@ -727,7 +709,7 @@ def main():
 
         st.markdown("---")
         st.subheader("Graphes (issus des commandes)")
-        process_data_display(st.session_state.global_data, key_prefix="term_")
+        process_data_display(st.session_state.global_data)
 
     # ------- Onglet Perf -------
     with tabs[2]:
