@@ -50,15 +50,12 @@ init_state()
 _NAN_SET = {"", "nan", "none", "null"}
 
 def _norm_entity(x: object) -> str | None:
-    """Normalise S, O, ou tout identifiant d'entité (supprime espaces, majuscules, O01->O1)."""
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return None
     s = str(x).strip()
     if s.lower() in _NAN_SET:
         return None
-    # compacte espaces internes (ex: "O  1" -> "O1")
     s = re.sub(r"\s+", "", s)
-    # S / O + nombre éventuel -> majuscules et supprime les zéros non-significatifs
     m = re.fullmatch(r"([a-zA-Z]+)0*([0-9]+)", s)
     if m:
         return f"{m.group(1).upper()}{int(m.group(2))}"
@@ -73,7 +70,6 @@ def _norm_perm(x: object) -> str | None:
     return s.upper()
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Nettoie systématiquement les colonnes de travail pour éviter des SCC cassés par de simples espaces."""
     df = df.copy()
     for col in ["Source", "Target"]:
         if col in df.columns:
@@ -124,21 +120,38 @@ def tarjan(V, adj):
             strongconnect(v)
     return scc, component_map
 
+# >>>>>> CORRIGÉ : propagation sur le DAG de composantes (condensation) <<<<<<
 def propagate_labels(components, adj, component_map):
-    labels = {frozenset(comp): set(comp) for comp in components}
-    def dfs(node, visited):
-        if node in visited: return
-        visited.add(node)
-        for neighbor in adj.get(node, []):
-            if neighbor in component_map:
-                neighbor_comp = frozenset(component_map[neighbor])
-                current_comp = frozenset(component_map[node])
-                labels[neighbor_comp].update(labels[current_comp])
-                dfs(neighbor, visited)
-    for comp in components:
-        for node in comp:
-            dfs(node, set())
-    return [labels[frozenset(comp)] for comp in components]
+    """
+    Calcule, pour chaque SCC, l'ensemble des étiquettes de tous les
+    *prédecesseurs* atteignant cette SCC (plus elle-même).
+    On travaille sur le graphe *condensé* (DAG) pour éviter toute sur-propagation.
+    """
+    # index des SCC
+    comp_index = {frozenset(c): i for i, c in enumerate(components)}
+    # labels initial = contenu de la SCC
+    labels = [set(c) for c in components]
+
+    # construire la condensation (DAG des SCC)
+    Gc = nx.DiGraph()
+    Gc.add_nodes_from(range(len(components)))
+    for u in component_map:
+        cu = comp_index[frozenset(component_map[u])]
+        for v in adj.get(u, []):
+            if v not in component_map:
+                continue
+            cv = comp_index[frozenset(component_map[v])]
+            if cu != cv:
+                Gc.add_edge(cu, cv)
+
+    # ordre topologique et propagation (u -> v  ⇒ labels[v] |= labels[u])
+    for u in nx.topological_sort(Gc):
+        for v in Gc.successors(u):
+            labels[v] |= labels[u]
+
+    # renvoyer une liste de sets alignée avec `components`
+    return labels
+# ---------------------------------------------------------------------------
 
 def simplify_relations(labels):
     reduced = nx.DiGraph()
@@ -160,10 +173,6 @@ def simplify_relations(labels):
 
 # =============== CONSTRUCTION DE L’ADJACENCE =================
 def apply_permissions(df_effective: pd.DataFrame):
-    """
-    Adjacence **uniquement** depuis les lignes R/W.
-    Aucune prise en compte de Owner/None.
-    """
     adj = {}
     def add_edge(a, b):
         if a is None or b is None: 
@@ -230,24 +239,17 @@ def draw_main_graph(df: pd.DataFrame):
     if df.empty:
         st.info("Aucune donnée pour générer le graphe.")
         return
-
-    # uniquement R/W
     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
     if df_eff.empty:
         st.info("Aucune relation R/W à afficher.")
         return
-
     adj = apply_permissions(df_eff)
-
-    # Composantes SCC (pour couleurs/placement)
     G_adj = nx.DiGraph()
     for u, vs in adj.items():
         for v in vs:
             G_adj.add_edge(u, v)
     scc = list(nx.strongly_connected_components(G_adj))
     scc_sorted = sorted(scc, key=len)
-
-    # positions grille
     x_step, y_step = 400, 300
     x_positions = [-2*x_step, -x_step, 0, x_step, 2*x_step]
     node_pos = {}
@@ -258,20 +260,15 @@ def draw_main_graph(df: pd.DataFrame):
             node_pos[n] = (x_positions[xi % len(x_positions)], -current_y)
             xi += 1
         current_y += y_step
-
     net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
-    # nœuds
     all_nodes = set(adj.keys()) | {v for lst in adj.values() for v in lst}
     for n in sorted(all_nodes):
         shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
         x, y = node_pos.get(n, (0, 0))
         net.add_node(n, label=n, shape=shape, color="lightblue", x=x, y=y)
-
-    # arêtes
     for src, dests in adj.items():
         for d in dests:
             net.add_edge(src, d, arrows="to")
-
     _pyvis_show(net)
 
 # =============== GRAPHE D’UN COMPOSANT ======================
@@ -280,51 +277,32 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
     if df_eff.empty:
         st.info("Aucune relation R/W à afficher.")
         return
-
     adj = apply_permissions(df_eff)
     net = Network(notebook=False, height="750px", width="100%", directed=True, cdn_resources="in_line")
-
     for n in sorted(component_nodes):
         shape = "ellipse" if n.startswith("S") else "box"
         net.add_node(n, label=n, shape=shape, color="lightcoral")
-
     for s, dests in adj.items():
         for d in dests:
             if s in component_nodes and d in component_nodes:
                 net.add_edge(s, d, arrows="to")
-
     _pyvis_show(net, height=750)
 
 # =============== SECTION « TABLE + GRAPHE COMBINÉ » =========
 def draw_combined_graph(components_1, adj_1, labels_1,
                         components_2, labels_2, simplified_edges_2, role_data):
-    """
-    Affiche à gauche les entités (S/O ou 'E*' en mode Entités) groupées par composantes fortement connexes (SCC),
-    au centre les arêtes R/W épurées (réduction transitive si DAG),
-    et en bas les classes d'équivalence (labels) + relations simplifiées.
-    - Corrigé: fonctionne aussi quand il n'y a pas de notion S/O (fichier 'Entités').
-    - Corrigé: aucune exclusion de composant à cause d'espaces/variantes — on s'appuie
-      sur la liste des composants calculés (components_1) plutôt que sur un filtre strict d'adjacence.
-    """
-
-    # --- Détection du mode (RBAC vs Entités simples)
     all_nodes_c1 = set().union(*[set(c) for c in components_1]) if components_1 else set()
     looks_like_rbac = any(isinstance(n, str) and (n.startswith("S") or n.startswith("O")) for n in all_nodes_c1)
-
-    # Nœuds autorisés pour l'affichage haut (ne PAS filtrer par adj pour ne pas casser les SCC)
     if looks_like_rbac:
         allowed_subjects = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("S")}
         allowed_objects  = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("O")}
     else:
-        # mode Entités: tout va à gauche, pas de séparation S/O
         allowed_subjects = set(all_nodes_c1)
         allowed_objects  = set()
 
-    # Conserver l'alignement composants <-> labels
     sorted_components_1 = sorted(components_1, key=len, reverse=True)
     labels_1_sorted     = [lbl for _, lbl in sorted(zip(components_1, labels_1), key=lambda t: len(t[0]), reverse=True)]
 
-    # Placement
     x_gap, y_gap = 320, 240
     cur_y_left = 0
     cur_y_right = 0
@@ -334,9 +312,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
 
-    # ----- NŒUDS HAUT (par SCC) -----
     for component, label in zip(sorted_components_1, labels_1_sorted):
-        # RBAC: sujets à gauche, objets à droite
         if looks_like_rbac:
             subjects = [s for s in component if s in allowed_subjects]
             objects  = [o for o in component if o in allowed_objects]
@@ -353,37 +329,30 @@ def draw_combined_graph(components_1, adj_1, labels_1,
                 node_indices[obj] = obj
                 cur_y_right += 1
         else:
-            # ENTITÉS: tout à gauche, forme 'box'
             for ent in sorted(component):
                 combined = _fmt_set(label | {ent})
                 net.add_node(ent, label=f'{ent}:\n{combined}', shape='box', x=-x_gap, y=-cur_y_left*y_gap)
                 node_indices[ent] = ent
                 cur_y_left += 1
 
-    # ----- ARÊTES DU HAUT -----
     for src, dests in adj_1.items():
         for dest in dests:
             if src in node_indices and dest in node_indices:
                 G1.add_edge(src, dest)
 
-    # Réduction transitive si DAG
     if nx.is_directed_acyclic_graph(G1):
         G1 = nx.transitive_reduction(G1)
     for s, d in G1.edges():
         net.add_edge(s, d, arrows="to")
 
-    # ----- BLOCS DU BAS (classes d'équivalence) -----
-    # grille 3 colonnes
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
 
-    # Conserver l'alignement pour components_2/labels_2
     sorted_components_2 = sorted(components_2, key=len, reverse=True)
     labels_2_sorted     = [lbl for _, lbl in sorted(zip(components_2, labels_2), key=lambda t: len(t[0]), reverse=True)]
 
     def comp_allowed(c):
-        # RBAC: on n'affiche les classes que si elles contiennent au moins un nœud connu
         return any(n in all_nodes_c1 for n in c) if looks_like_rbac else True
 
     for i, (component, label) in enumerate(zip(sorted_components_2, labels_2_sorted)):
@@ -399,8 +368,6 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         net.add_node(base_idx + i, label=text, shape='box', x=x, y=y,
                      width_constraint=320, height_constraint=110)
 
-    # relier les classes par relations simplifiées
-    # (on retrouve leur index après tri en comparant les ensembles)
     def index_in_sorted(target_set):
         for idx, lbl in enumerate(labels_2_sorted):
             if lbl == target_set:
@@ -417,7 +384,6 @@ def draw_combined_graph(components_1, adj_1, labels_1,
 
 # =============== PROPAGATION RBAC (fichiers) =================
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
-    # IMPORTANT: normaliser AVANT tout calcul pour éviter des doublons (' S1' vs 'S1')
     df = normalize_df(df)
     if "Role" not in df.columns: df["Role"] = None
     if "Heritage" not in df.columns: df["Heritage"] = None
@@ -457,7 +423,6 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
         e1 = _norm_entity(row[col_e1])
         e2 = _norm_entity(row[col_e2])
         if e1 and e2:
-            # convention: E2 lit E1 -> arête E1 -> E2 (comme Permission=R)
             rows.append({"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None})
     if not rows:
         raise ValueError("Aucune paire valide (Entity1, Entity2) trouvée.")
@@ -465,7 +430,6 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
 
 # =============== PERF (Tarjan vs Propagation) ===============
 def evaluer_performance_interface(nb_entites: int):
-    # graphe aléatoire très épars
     G = nx.DiGraph()
     G.add_nodes_from([f"E{i}" for i in range(nb_entites)])
     for i in range(nb_entites):
@@ -508,21 +472,19 @@ def process_data_display(df: pd.DataFrame):
         st.info("Aucune donnée à afficher.")
         return
 
-    # Normalisation & propagation (RBAC)
     df_expanded = propagate_rbac_from_excel(df)
     df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
     if df_effective.empty:
         st.info("Aucune relation R/W à afficher.")
         return
 
-    # Adjacence & SCC
     adj = apply_permissions(df_effective)
     active_nodes = set(adj.keys())
     for lst in adj.values(): active_nodes.update(lst)
 
     V = sorted(active_nodes)
     scc, cmap = tarjan(V, adj)
-    labels = propagate_labels(scc, adj, cmap)
+    labels = propagate_labels(scc, adj, cmap)   # ← nouvelle propagation (condensation DAG)
     simplified = simplify_relations(labels)
 
     st.subheader("Table des entités et étiquettes")
@@ -536,7 +498,6 @@ def process_data_display(df: pd.DataFrame):
     role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
     draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
 
-    # ====== Graphe principal + composants (SCC) ======
     st.markdown("---")
     st.subheader("Vue principale (toutes arêtes R/W)")
     draw_main_graph(df_expanded)
@@ -561,7 +522,6 @@ def process_data_display(df: pd.DataFrame):
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
-    """Interprète une commande, met à jour le DF et renvoie (df, message)."""
     def ensure_cols(df):
         for c in ["Source","Permission","Target","Role","Heritage"]:
             if c not in df.columns: df[c] = None
@@ -575,7 +535,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     command, args = parts[0], parts[1:]
     out = [f"💬 Command executed: C:\\> {line}"]
 
-    # -------- PERF --------
     if command == "EvalPerf":
         total = len(st.session_state.sujets_definis | st.session_state.objets_definis)
         if total == 0:
@@ -585,7 +544,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append("✅ Performance chart generated.")
         return df, "\n".join(out)
 
-    # -------- RBAC OBJ simple --------
     if command == "AddObj" and len(args) == 1:
         obj = _norm_entity(args[0])
         if obj in st.session_state.objets_definis:
@@ -658,7 +616,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append(f"🗑️ Permission '{perm}' on '{obj}' revoked from role '{role}' ({before-len(df)} propagation(s) removed).")
         return df, "\n".join(out)
 
-    # -------- DAC --------
     if len(parts)>=3 and parts[1]=="AddObj":
         owner, obj = _norm_entity(parts[0]), _norm_entity(parts[2])
         if owner not in st.session_state.sujets_definis:
@@ -685,7 +642,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")
         return df, "\n".join(out)
 
-    # -------- China Wall --------
     if command == "Never":
         if "for" in args:
             idx = args.index("for")
@@ -722,7 +678,6 @@ def main():
 
     tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
 
-    # ------- Onglet Excel -------
     with tabs[0]:
         st.write("Charge un fichier **RBAC** (Source, Permission, Target, Role) ou **Entités** (Entity1, Entity2).")
         up = st.file_uploader("Importer un fichier Excel", type=["xlsx"])
@@ -752,7 +707,6 @@ def main():
         st.subheader("Visualisations")
         process_data_display(st.session_state.global_data)
 
-    # ------- Onglet Terminal -------
     with tabs[1]:
         st.markdown(
             "Entre une commande puis **Entrée**  \n"
@@ -766,7 +720,6 @@ def main():
         st.subheader("Graphes (issus des commandes)")
         process_data_display(st.session_state.global_data)
 
-    # ------- Onglet Perf -------
     with tabs[2]:
         st.write("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.")
         n = st.slider("Nombre d'entités", 20, 2000, 200, step=20)
