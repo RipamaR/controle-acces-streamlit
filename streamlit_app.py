@@ -515,11 +515,7 @@ def process_data_display(df: pd.DataFrame):
         if cols[i % 4].button(f"Voir: {label}", key=f"sccbtn_{i}"):
             st.session_state.selected_component = i
 
-    if st.session_state.selected_component is not None:
-        st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
-        draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
-        if st.button("↩️ Revenir au graphe principal"):
-            st.session_state.selected_component = None
+   
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
