@@ -320,6 +320,17 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         col = i % 3; row = i // 3
         x, y = positions[col]; y += row*offset_y
         net.add_node(base_idx+i, label=text, shape='box', x=x, y=y, width_constraint=300, height_constraint=100)
+#Entités
+    for i, (component, label) in enumerate(zip(sorted_components_2, labels_2)):
+        if not comp_has_allowed(component):
+            continue
+        entity_name = ', '.join(map(str, component))
+        combined = '{' + ', '.join(sorted({str(x) for x in (label | set(component))})) + '}'
+        text = f'| {entity_name}: {combined} |'
+        col = i % 3; row = i // 3
+        x, y = positions[col]; y += row*offset_y
+        net.add_node(base_idx+i, label=text, shape='box', x=x, y=y,
+                     width_constraint=300, height_constraint=100)
 
     def find_idx_by_labelset(target_set):
         for i, lbl in enumerate(labels_2):
