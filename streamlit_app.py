@@ -739,7 +739,7 @@ def _run_command_callback():
 def main():
     st.title("🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires– DAC / MAC/ RBAC /ABAC")
 
-    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
+    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
