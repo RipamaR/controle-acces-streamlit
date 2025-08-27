@@ -21,7 +21,7 @@ from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
 
 # ===================== CONFIG UI ===========================
-st.set_page_config(page_title="Interface graphique pour la représentation de contrôle de flux de données sécuritaires – RBAC / DAC / China-Wall", layout="wide")
+st.set_page_config(page_title="Contrôle d'accès – RBAC / DAC / China-Wall", layout="wide")
 
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
@@ -49,7 +49,7 @@ init_state()
 # ===================== NORMALISATION =======================
 _NAN_SET = {"", "nan", "none", "null"}
 
-def _norm_entity(x: object) -> str | None:
+def _norm_entity(x):
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return None
     s = str(x).strip()
@@ -61,7 +61,7 @@ def _norm_entity(x: object) -> str | None:
         return f"{m.group(1).upper()}{int(m.group(2))}"
     return s.upper()
 
-def _norm_perm(x: object) -> str | None:
+def _norm_perm(x):
     if x is None or (isinstance(x, float) and pd.isna(x)):
         return None
     s = str(x).strip()
@@ -75,11 +75,11 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].map(_norm_entity)
     if "Role" in df.columns:
-        df["Role"] = df["Role"].apply(lambda v: None if pd.isna(v) else str(v).strip() or None)
+        df["Role"] = df["Role"].apply(lambda v: None if pd.isna(v) else (str(v).strip() or None))
     if "Permission" in df.columns:
         df["Permission"] = df["Permission"].map(_norm_perm)
     if "Heritage" in df.columns:
-        df["Heritage"] = df["Heritage"].apply(lambda v: None if pd.isna(v) else str(v).strip() or None)
+        df["Heritage"] = df["Heritage"].apply(lambda v: None if pd.isna(v) else (str(v).strip() or None))
     return df
 
 # ================= ALGORITHMES (Tarjan & co) ================
@@ -120,13 +120,10 @@ def tarjan(V, adj):
             strongconnect(v)
     return scc, component_map
 
-# ---- Propagation CORRIGÉE : sur le DAG de composantes (condensation) ----
+# ---- Propagation sur le DAG de composantes (condensation) ----
 def propagate_labels(components, adj, component_map):
-    # map SCC -> index
     comp_index = {frozenset(c): i for i, c in enumerate(components)}
-    # labels initiaux : contenu de la SCC
     labels = [set(c) for c in components]
-    # construire le DAG des SCC
     Gc = nx.DiGraph()
     Gc.add_nodes_from(range(len(components)))
     for u in component_map:
@@ -137,12 +134,11 @@ def propagate_labels(components, adj, component_map):
             cv = comp_index[frozenset(component_map[v])]
             if cu != cv:
                 Gc.add_edge(cu, cv)
-    # ordre topologique et propagation
     for u in nx.topological_sort(Gc):
         for v in Gc.successors(u):
             labels[v] |= labels[u]
     return labels
-# -------------------------------------------------------------------------
+# ---------------------------------------------------------------
 
 def simplify_relations(labels):
     reduced = nx.DiGraph()
@@ -181,7 +177,7 @@ def apply_permissions(df_effective: pd.DataFrame):
     return adj
 
 # =============== UTILITAIRES TABLES =========================
-def _fmt_set(ss: set[str]) -> str:
+def _fmt_set(ss: set) -> str:
     return "{" + ", ".join(sorted(ss)) + "}"
 
 def display_entities_table(components, labels):
@@ -457,6 +453,38 @@ def evaluer_performance_interface(nb_entites: int):
     ax.set_title(f"Performance pour {nb_entites} entités")
     st.pyplot(fig)
 
+# =============== VÉRIFICATION CHINA WALL ===================
+def check_china_wall(df_after: pd.DataFrame):
+    """
+    Retourne (ok, message). ok=False si une règle est violée, avec le message d'erreur.
+    """
+    try:
+        df_expanded = propagate_rbac_from_excel(df_after)
+        df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
+        if df_effective.empty:
+            return True, None
+        adj = apply_permissions(df_effective)
+        active_nodes = set(adj.keys())
+        for lst in adj.values(): active_nodes.update(lst)
+        V = sorted(active_nodes)
+        scc, cmap = tarjan(V, adj)
+        labels = propagate_labels(scc, adj, cmap)
+        comp_sets = [lbl | set(comp) for comp, lbl in zip(scc, labels)]
+
+        for comp in comp_sets:
+            for interdit in st.session_state.interdictions_globales:
+                if set(interdit).issubset(comp):
+                    return False, f"⛔ CHINA WALL ERROR: Global restriction violated for {interdit}"
+        for comp in comp_sets:
+            for ent, combos in st.session_state.interdictions_entites.items():
+                if ent in comp:
+                    for interdit in combos:
+                        if set(interdit).issubset(comp):
+                            return False, f"⛔ CHINA WALL ERROR: Restriction violated for {ent}: {interdit}"
+        return True, None
+    except Exception as e:
+        return True, f"⚠️ China Wall check skipped due to error: {e}"
+
 # =============== VISUALISATION COMPLÈTE ====================
 def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     if df is None or df.empty:
@@ -502,7 +530,6 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     cols = st.columns(4)
     for i, comp in enumerate(scc):
         label = ", ".join(sorted(comp))
-        # >>> clés uniques par appel
         if cols[i % 4].button(f"Voir: {label}", key=f"{key_prefix}_sccbtn_{i}"):
             st.session_state.selected_component = i
 
@@ -514,6 +541,7 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
+    """Interprète une commande, met à jour le DF et renvoie (df, message)."""
     def ensure_cols(df):
         for c in ["Source","Permission","Target","Role","Heritage"]:
             if c not in df.columns: df[c] = None
@@ -527,6 +555,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     command, args = parts[0], parts[1:]
     out = [f"💬 Command executed: C:\\> {line}"]
 
+    # -------- PERF --------
     if command == "EvalPerf":
         total = len(st.session_state.sujets_definis | st.session_state.objets_definis)
         if total == 0:
@@ -536,6 +565,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append("✅ Performance chart generated.")
         return df, "\n".join(out)
 
+    # -------- RBAC OBJ simple --------
     if command == "AddObj" and len(args) == 1:
         obj = _norm_entity(args[0])
         if obj in st.session_state.objets_definis:
@@ -577,6 +607,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append(f"✅ Subject '{subject}' added" + (f" with role '{role}'" if role else ""))
         return df, "\n".join(out)
 
+    # -------- RBAC GrantPermission (avec vérif China Wall) ---
     if command == "GrantPermission":
         if len(args)!=3:
             out.append("❌ Usage: GrantPermission R1 R O1"); return df, "\n".join(out)
@@ -585,12 +616,22 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
             out.append(f"❌ Role '{role}' is not defined."); return df, "\n".join(out)
         if obj not in st.session_state.objets_definis:
             out.append(f"❌ Object '{obj}' does not exist. Use AddObj first."); return df, "\n".join(out)
+
+        temp = df.copy()
         st.session_state.role_permissions.setdefault(role,set()).add((perm,obj))
         for subj, roles in st.session_state.subject_roles.items():
             if role in roles:
-                mask = (df["Source"]==subj)&(df["Permission"]==perm)&(df["Target"]==obj)&(df["Role"]==role)
+                mask = (temp["Source"]==subj)&(temp["Permission"]==perm)&(temp["Target"]==obj)&(temp["Role"]==role)
                 if not mask.any():
-                    df = pd.concat([df, pd.DataFrame([{"Source":subj,"Permission":perm,"Target":obj,"Role":role,"Heritage":"Role"}], columns=df.columns)], ignore_index=True)
+                    temp = pd.concat([temp, pd.DataFrame([{"Source":subj,"Permission":perm,"Target":obj,"Role":role,"Heritage":"Role"}], columns=temp.columns)], ignore_index=True)
+
+        ok, msg = check_china_wall(temp)
+        st.session_state.role_permissions.setdefault(role,set()).discard((perm,obj))
+        if not ok:
+            return df, "\n".join(out + [msg])
+
+        st.session_state.role_permissions.setdefault(role,set()).add((perm,obj))
+        df = temp
         out.append(f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated.")
         return df, "\n".join(out)
 
@@ -608,6 +649,7 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append(f"🗑️ Permission '{perm}' on '{obj}' revoked from role '{role}' ({before-len(df)} propagation(s) removed).")
         return df, "\n".join(out)
 
+    # -------- DAC --------
     if len(parts)>=3 and parts[1]=="AddObj":
         owner, obj = _norm_entity(parts[0]), _norm_entity(parts[2])
         if owner not in st.session_state.sujets_definis:
@@ -630,10 +672,17 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         is_owner = ((df["Source"]==owner) & (df["Target"]==obj) & (df["Permission"]=="Owner")).any()
         if not is_owner:
             out.append(f"⛔ Error: '{owner}' is not the owner of '{obj}'."); return df, "\n".join(out)
-        df = pd.concat([df, pd.DataFrame([{"Source":subject,"Permission":perm,"Target":obj,"Role":None,"Heritage":None}], columns=df.columns)], ignore_index=True)
+
+        temp = pd.concat([df, pd.DataFrame([{"Source":subject,"Permission":perm,"Target":obj,"Role":None,"Heritage":None}], columns=df.columns)], ignore_index=True)
+        ok, msg = check_china_wall(temp)
+        if not ok:
+            return df, "\n".join(out + [msg])
+
+        df = temp
         out.append(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")
         return df, "\n".join(out)
 
+    # -------- China Wall : définition des règles ----------
     if command == "Never":
         if "for" in args:
             idx = args.index("for")
@@ -646,6 +695,35 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         etiquettes = [e.strip("{} ,") for e in args]
         st.session_state.interdictions_globales.append(etiquettes)
         out.append(f"🚧 Globally forbidden combination: {etiquettes}")
+        return df, "\n".join(out)
+
+    # -------- AddCh (canal direct) avec contrôle China Wall ---
+    if command == "AddCh":
+        # formes supportées :
+        #  - AddCh E1 E2                -> R par défaut (E1 --R--> E2)
+        #  - AddCh S1 R O1
+        #  - AddCh S1 R R1 O1           -> avec rôle
+        if len(args) == 2:
+            source = _norm_entity(args[0]); permission = "R"; role = None; target = _norm_entity(args[1])
+        elif len(args) == 3:
+            source = _norm_entity(args[0]); permission = _norm_perm(args[1]); role = None; target = _norm_entity(args[2])
+        elif len(args) == 4:
+            source = _norm_entity(args[0]); permission = _norm_perm(args[1]); role = args[2].strip(); target = _norm_entity(args[3])
+        else:
+            out.append("❌ Usage: AddCh E1 E2  |  AddCh S1 R O1  |  AddCh S1 R R1 O1")
+            return df, "\n".join(out)
+
+        temp = pd.concat([df, pd.DataFrame([{"Source":source,"Permission":permission,"Target":target,"Role":role,"Heritage":None}], columns=df.columns)], ignore_index=True)
+
+        ok, msg = check_china_wall(temp)
+        if not ok:
+            return df, "\n".join(out + [msg])
+
+        df = normalize_df(temp)
+        if len(args) == 2:
+            out.append(f"✅ Channel added: {source} --R--> {target}")
+        else:
+            out.append(f"✅ Channel added: {source} --{permission}/{role}--> {target}")
         return df, "\n".join(out)
 
     if command == "show":
@@ -666,7 +744,7 @@ def _run_command_callback():
     st.rerun()
 
 def main():
-    st.title("🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires– DAC / MAC/ RBAC /ABAC")
+    st.title("🔐 Contrôle d'accès – RBAC / DAC / China-Wall")
 
     tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
 
@@ -705,7 +783,7 @@ def main():
         st.markdown(
             "Entre une commande puis **Entrée**  \n"
             "Exemples : `AddSub S2` · `S2 AddObj O2` · `S2 Grant S3 O2 R` · "
-            "`AddRole R1` · `GrantPermission R1 R O1` · `Never {A,B}` · `show`"
+            "`AddRole R1` · `GrantPermission R1 R O1` · `Never {A,B}` · `AddCh S1 R O1` · `show`"
         )
         st.text_input("C:\\>", key="cmd_input", placeholder="Ex: AddSub S1 R1", on_change=_run_command_callback)
         st.text_area("Historique", "\n\n".join(st.session_state.history), height=340)
