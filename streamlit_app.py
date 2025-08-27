@@ -457,6 +457,38 @@ def evaluer_performance_interface(nb_entites: int):
     ax.set_title(f"Performance pour {nb_entites} entités")
     st.pyplot(fig)
 
+# =============== VÉRIFICATION CHINA WALL ===================
+def check_china_wall(df_after: pd.DataFrame):
+    """
+    Retourne (ok, message). ok=False si une règle est violée, avec le message d'erreur.
+    """
+    try:
+        df_expanded = propagate_rbac_from_excel(df_after)
+        df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
+        if df_effective.empty:
+            return True, None
+        adj = apply_permissions(df_effective)
+        active_nodes = set(adj.keys())
+        for lst in adj.values(): active_nodes.update(lst)
+        V = sorted(active_nodes)
+        scc, cmap = tarjan(V, adj)
+        labels = propagate_labels(scc, adj, cmap)
+        comp_sets = [lbl | set(comp) for comp, lbl in zip(scc, labels)]
+
+        for comp in comp_sets:
+            for interdit in st.session_state.interdictions_globales:
+                if set(interdit).issubset(comp):
+                    return False, f"⛔ CHINA WALL ERROR: Global restriction violated for {interdit}"
+        for comp in comp_sets:
+            for ent, combos in st.session_state.interdictions_entites.items():
+                if ent in comp:
+                    for interdit in combos:
+                        if set(interdit).issubset(comp):
+                            return False, f"⛔ CHINA WALL ERROR: Restriction violated for {ent}: {interdit}"
+        return True, None
+    except Exception as e:
+        return True, f"⚠️ China Wall check skipped due to error: {e}"
+
 # =============== VISUALISATION COMPLÈTE ====================
 def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     if df is None or df.empty:
@@ -634,6 +666,20 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")
         return df, "\n".join(out)
 
+    if command == "Never":
+        if "for" in args:
+            idx = args.index("for")
+            etiquettes = [e.strip("{} ,") for e in args[:idx]]
+            entites = [e.strip("{} ,") for e in args[idx+1:]]
+            for ent in entites:
+                st.session_state.interdictions_entites.setdefault(ent, []).append(etiquettes)
+            out.append(f"🚧 Forbidden combination {etiquettes} for entities: {entites}")
+            return df, "\n".join(out)
+        etiquettes = [e.strip("{} ,") for e in args]
+        st.session_state.interdictions_globales.append(etiquettes)
+        out.append(f"🚧 Globally forbidden combination: {etiquettes}")
+        return df, "\n".join(out)
+
     if command == "show":
         process_data_display(df, key_prefix="terminal_show")
         out.append("🚀 Génération des graphes…")
@@ -641,38 +687,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
 
     out.append("❌ Unknown command.")
     return df, "\n".join(out)
-
-# =============== VÉRIFICATION CHINA WALL ===================
-def check_china_wall(df_after: pd.DataFrame):
-    """
-    Retourne (ok, message). ok=False si une règle est violée, avec le message d'erreur.
-    """
-    try:
-        df_expanded = propagate_rbac_from_excel(df_after)
-        df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
-        if df_effective.empty:
-            return True, None
-        adj = apply_permissions(df_effective)
-        active_nodes = set(adj.keys())
-        for lst in adj.values(): active_nodes.update(lst)
-        V = sorted(active_nodes)
-        scc, cmap = tarjan(V, adj)
-        labels = propagate_labels(scc, adj, cmap)
-        comp_sets = [lbl | set(comp) for comp, lbl in zip(scc, labels)]
-
-        for comp in comp_sets:
-            for interdit in st.session_state.interdictions_globales:
-                if set(interdit).issubset(comp):
-                    return False, f"⛔ CHINA WALL ERROR: Global restriction violated for {interdit}"
-        for comp in comp_sets:
-            for ent, combos in st.session_state.interdictions_entites.items():
-                if ent in comp:
-                    for interdit in combos:
-                        if set(interdit).issubset(comp):
-                            return False, f"⛔ CHINA WALL ERROR: Restriction violated for {ent}: {interdit}"
-        return True, None
-    except Exception as e:
-        return True, f"⚠️ China Wall check skipped due to error: {e}"
 
 # ======================= UI / CALLBACK =====================
 def _run_command_callback():
