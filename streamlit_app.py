@@ -785,12 +785,7 @@ def main():
         st.subheader("Graphes (issus des commandes)")
         process_data_display(st.session_state.global_data, key_prefix="terminal")
 
-    # ------- Onglet Perf -------
-    with tabs[2]:
-        st.write("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.")
-        n = st.slider("Nombre d'entités", 20, 2000, 200, step=20)
-        if st.button("Lancer EvalPerf"):
-            evaluer_performance_interface(n)
+    
 
 if __name__ == "__main__":
     main()
