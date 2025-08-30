@@ -552,11 +552,6 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     display_role_table_streamlit(df_expanded)
 
     st.markdown("---")
-    st.subheader(tr("Graphe combiné (entités & classes d'équivalence)", "Combined graph (entities & equivalence classes)"))
-    role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
-    draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
-
-    st.markdown("---")
     st.subheader(tr("Vue principale (toutes arêtes R/W)", "Main view (all R/W edges)"))
     draw_main_graph(df_expanded)
 
@@ -578,8 +573,11 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
             "Selected component: {x}"
         ).format(x=', '.join(sorted(scc[st.session_state.selected_component]))))
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
-        if st.button(tr("↩️ Revenir au graphe principal", "↩️ Back to main graph"), key=f"{key_prefix}_back_to_main_graph"):
-            st.session_state.selected_component = None
+
+    st.markdown("---")
+    st.subheader(tr("Graphe combiné (entités & classes d'équivalence)", "Combined graph (entities & equivalence classes)"))
+    role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
+    draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
