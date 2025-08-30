@@ -765,8 +765,8 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         df = pd.concat([df, pd.DataFrame([{
             "Source": ent, "Permission": None, "Target": None, "Role": None, "Heritage": None
         }], columns=df.columns)], ignore_index=True)
-        out.append(tr("✅ Entité '{e}' ajoutée (sans lien). Utilisez 'AddCh E1 E2' pour créer un lien.",
-                      "✅ Entity '{e}' added (no link). Use 'AddCh E1 E2' to create a link.").format(e=ent))
+        out.append(tr("✅ Entité '{e}' ajoutée ",
+                      "✅ Entity '{e}' added").format(e=ent))
         return df, "\n".join(out)
 
     if command == "show":
