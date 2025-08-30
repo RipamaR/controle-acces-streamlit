@@ -839,26 +839,31 @@ def main():
 
     # ------- Onglet Terminal -------
     with tabs[1]:
-        st.markdown(
-            tr(
-                "Entre une commande puis **Entrée**  \n"
-                "----------Version Entité------------ : `AddEnt E1` · `AddEnt E2` · `AddCh E1 E2` · \n"
-                "----------DAC------------ : `AddSub S2` · `AddSub S3` · `S2 AddObj O2`· `S2 Grant S3 O2 R` · \n"
-                "----------MAC------------ : `AddSub S1` · `AddObj O1` · `AddCh S1 R O1`·  \n"
-                "----------China-Wall------------ : `AddSub S1` · `AddObj O1` · `Never {S1, O1}`· `AddCh S1 R O1`·  \n"
-                "----------RBAC------------ : `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1`· `AddSub S1 R1` · \n",
-                
-            )
+    st.markdown(
+        tr(
+            "Entre une commande puis **Entrée**  \n"
+            "----------Version Entité------------ : `AddEnt E1` · `AddEnt E2` · `AddCh E1 E2` · \n"
+            "----------DAC------------ : `AddSub S2` · `AddSub S3` · `S2 AddObj O2`· `S2 Grant S3 O2 R` · \n"
+            "----------MAC------------ : `AddSub S1` · `AddObj O1` · `AddCh S1 R O1`·  \n"
+            "----------China-Wall------------ : `AddSub S1` · `AddObj O1` · `Never {S1, O1}`· `AddCh S1 R O1`·  \n"
+            "----------RBAC------------ : `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1`· `AddSub S1 R1` · \n",
+            "Type a command then **Enter**  \n"
+            "----------Entity version------------ : `AddEnt E1` · `AddEnt E2` · `AddCh E1 E2` · \n"
+            "----------DAC------------ : `AddSub S2` · `AddSub S3` · `S2 AddObj O2` · `S2 Grant S3 O2 R` · \n"
+            "----------MAC------------ : `AddSub S1` · `AddObj O1` · `AddCh S1 R O1` ·  \n"
+            "----------China-Wall------------ : `AddSub S1` · `AddObj O1` · `Never {S1, O1}` · `AddCh S1 R O1` ·  \n"
+            "----------RBAC------------ : `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1` · `AddSub S1 R1` · \n"
         )
-        st.text_input("C:\\>", key="cmd_input",
-                      placeholder=tr("Ex: AddSub S1 R1", "Ex: AddSub S1 R1"),
-                      on_change=_run_command_callback)
-        st.text_area(tr("Historique", "History"),
-                     "\n\n".join(st.session_state.history), height=340)
+    )
+    st.text_input("C:\\>", key="cmd_input",
+                  placeholder=tr("Ex: AddSub S1 R1", "Ex: AddSub S1 R1"),
+                  on_change=_run_command_callback)
+    st.text_area(tr("Historique", "History"),
+                 "\n\n".join(st.session_state.history), height=340)
 
-        st.markdown("---")
-        st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
-        process_data_display(st.session_state.global_data, key_prefix="terminal")
+    st.markdown("---")
+    st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
+    process_data_display(st.session_state.global_data, key_prefix="terminal")
 
 if __name__ == "__main__":
     main()
