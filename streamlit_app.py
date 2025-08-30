@@ -515,6 +515,12 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     labels = propagate_labels(scc, adj, cmap)
     simplified = simplify_relations(labels)
 
+    st.subheader("Table des entités et étiquettes")
+    display_entities_table(scc, labels)
+
+    st.subheader("Table RBAC (si rôles)")
+    display_role_table_streamlit(df_expanded)
+
     st.markdown("---")
     st.subheader("Vue principale (toutes arêtes R/W)")
     draw_main_graph(df_expanded)
@@ -535,11 +541,6 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
         st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
 
-    st.subheader("Table des entités et étiquettes")
-    display_entities_table(scc, labels)
-
-    st.subheader("Table RBAC (si rôles)")
-    display_role_table_streamlit(df_expanded)
 
     st.markdown("---")
     st.subheader("Graphe combiné (entités & classes d'équivalence)")
