@@ -515,17 +515,6 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     labels = propagate_labels(scc, adj, cmap)
     simplified = simplify_relations(labels)
 
-    st.subheader("Table des entités et étiquettes")
-    display_entities_table(scc, labels)
-
-    st.subheader("Table RBAC (si rôles)")
-    display_role_table_streamlit(df_expanded)
-
-    st.markdown("---")
-    st.subheader("Graphe combiné (entités & classes d'équivalence)")
-    role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
-    draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
-
     st.markdown("---")
     st.subheader("Vue principale (toutes arêtes R/W)")
     draw_main_graph(df_expanded)
@@ -547,6 +536,18 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
         if st.button("↩️ Revenir au graphe principal", key=f"{key_prefix}_back_to_main_graph"):
             st.session_state.selected_component = None
+
+    st.subheader("Table des entités et étiquettes")
+    display_entities_table(scc, labels)
+
+    st.subheader("Table RBAC (si rôles)")
+    display_role_table_streamlit(df_expanded)
+
+    st.markdown("---")
+    st.subheader("Graphe combiné (entités & classes d'équivalence)")
+    role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
+    draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
+
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
@@ -746,7 +747,7 @@ def _run_command_callback():
 def main():
     st.title("🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires– DAC / MAC/ RBAC /ABAC")
 
-    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
+    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
@@ -792,12 +793,6 @@ def main():
         st.subheader("Graphes (issus des commandes)")
         process_data_display(st.session_state.global_data, key_prefix="terminal")
 
-    # ------- Onglet Perf -------
-    with tabs[2]:
-        st.write("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.")
-        n = st.slider("Nombre d'entités", 20, 2000, 200, step=20)
-        if st.button("Lancer EvalPerf"):
-            evaluer_performance_interface(n)
 
 if __name__ == "__main__":
     main()
