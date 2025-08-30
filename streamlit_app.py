@@ -775,7 +775,6 @@ def main():
                 st.error(f"Erreur de lecture du fichier: {e}")
 
         st.markdown("---")
-        st.subheader("Visualisations")
         process_data_display(st.session_state.global_data, key_prefix="excel")
 
     # ------- Onglet Terminal -------
