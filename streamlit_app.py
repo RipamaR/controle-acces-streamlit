@@ -534,7 +534,7 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     if st.session_state.selected_component is not None:
         st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
-        if st.button("↩️ Revenir au graphe principal", key=f"{key_prefix}_back_to_main_graph"):
+        if st.button("", key=f"{key_prefix}_back_to_main_graph"):
             st.session_state.selected_component = None
 
     st.subheader("Table des entités et étiquettes")
