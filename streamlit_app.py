@@ -801,7 +801,6 @@ def main():
     tabs = st.tabs([
         tr("📂 Fichier Excel", "📂 Excel file"),
         tr("⌨️ Terminal", "⌨️ Terminal"),
-        tr("📊 Perf", "📊 Perf"),
     ])
 
     # ------- Onglet Excel -------
@@ -859,16 +858,6 @@ def main():
         st.markdown("---")
         st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
         process_data_display(st.session_state.global_data, key_prefix="terminal")
-
-    # ------- Onglet Perf -------
-    with tabs[2]:
-        st.write(tr(
-            "Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.",
-            "Measure runtimes (SCC vs propagation) on a sparse random graph."
-        ))
-        n = st.slider(tr("Nombre d'entités", "Number of entities"), 20, 2000, 200, step=20)
-        if st.button(tr("Lancer EvalPerf", "Run EvalPerf")):
-            evaluer_performance_interface(n)
 
 if __name__ == "__main__":
     main()
