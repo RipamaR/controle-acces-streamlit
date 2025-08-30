@@ -846,7 +846,7 @@ def main():
                 "----------DAC------------ : `AddSub S2` · `AddSub S3` · `S2 AddObj O2`· `S2 Grant S3 O2 R` · \n"
                 "----------MAC------------ : `AddSub S1` · `AddObj O1` · `AddCh S1 R O1`·  \n"
                 "----------China-Wall------------ : `AddSub S1` · `AddObj O1` · `Never {S1, O1}`· `AddCh S1 R O1`·  \n"
-                "----------RBAC------------ : `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1`· `AddSub S1 R1` · \n"
+                "----------RBAC------------ : `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1`· `AddSub S1 R1` · \n",
                 
             )
         )
