@@ -476,16 +476,13 @@ def check_china_wall(df_after: pd.DataFrame):
         scc, cmap = tarjan(V, adj)
         labels = propagate_labels(scc, adj, cmap)
 
-        # jeux d'étiquettes complets par composante (équiv. à comp ∪ labels[comp])
         comp_sets = [lbl | set(comp) for comp, lbl in zip(scc, labels)]
 
-        # Règles globales
         for comp in comp_sets:
             for interdit in st.session_state.interdictions_globales:
                 if set(interdit).issubset(comp):
                     return False, f"⛔ CHINA WALL ERROR: Global restriction violated for {interdit}"
 
-        # Règles par entité
         for comp in comp_sets:
             for ent, combos in st.session_state.interdictions_entites.items():
                 if ent in comp:
@@ -495,7 +492,6 @@ def check_china_wall(df_after: pd.DataFrame):
 
         return True, None
     except Exception as e:
-        # en cas d'erreur inattendue, ne pas bloquer la commande
         return True, f"⚠️ China Wall check skipped due to error: {e}"
 
 # =============== VISUALISATION COMPLÈTE ====================
@@ -543,7 +539,6 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     cols = st.columns(4)
     for i, comp in enumerate(scc):
         label = ", ".join(sorted(comp))
-        # >>> clés uniques par appel
         if cols[i % 4].button(f"Voir: {label}", key=f"{key_prefix}_sccbtn_{i}"):
             st.session_state.selected_component = i
 
@@ -719,6 +714,18 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         else:
             return df, "\n".join(out + [f"✅ Channel added: {source} --{permission}/{role}--> {target}"])
 
+    # --- AddEnt (entités neutres) ---------------------------------------
+    if command == "AddEnt":
+        if len(args) != 1:
+            out.append("❌ Usage: AddEnt E1")
+            return df, "\n".join(out)
+        ent = _norm_entity(args[0])
+        # on ajoute une ligne “neutre” (pas d’arête), utile pour référencer l’entité
+        df = pd.concat([df, pd.DataFrame([{
+            "Source": ent, "Permission": None, "Target": None, "Role": None, "Heritage": None
+        }], columns=df.columns)], ignore_index=True)
+        return df, "\n".join(out + [f"✅ Entity '{ent}' added (no link). Utilisez 'AddCh E1 E2' pour créer un lien."])
+
     if command == "show":
         process_data_display(df, key_prefix="terminal_show")
         out.append("🚀 Génération des graphes…")
@@ -739,7 +746,7 @@ def _run_command_callback():
 def main():
     st.title("🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires– DAC / MAC/ RBAC /ABAC")
 
-    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal"])
+    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
@@ -776,7 +783,7 @@ def main():
         st.markdown(
             "Entre une commande puis **Entrée**  \n"
             "Exemples : `AddSub S2` · `S2 AddObj O2` · `S2 Grant S3 O2 R` · "
-            "`AddRole R1` · `GrantPermission R1 R O1` · `Never {A,B}` · `AddCh S1 R O1` · `show`"
+            "`AddRole R1` · `GrantPermission R1 R O1` · `Never {A,B}` · `AddEnt E1` · `AddCh E1 E2` · `show`"
         )
         st.text_input("C:\\>", key="cmd_input", placeholder="Ex: AddSub S1 R1", on_change=_run_command_callback)
         st.text_area("Historique", "\n\n".join(st.session_state.history), height=340)
@@ -785,7 +792,12 @@ def main():
         st.subheader("Graphes (issus des commandes)")
         process_data_display(st.session_state.global_data, key_prefix="terminal")
 
-    
+    # ------- Onglet Perf -------
+    with tabs[2]:
+        st.write("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.")
+        n = st.slider("Nombre d'entités", 20, 2000, 200, step=20)
+        if st.button("Lancer EvalPerf"):
+            evaluer_performance_interface(n)
 
 if __name__ == "__main__":
     main()
