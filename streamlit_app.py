@@ -795,7 +795,7 @@ def main():
 
     st.title(tr(
         "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC",
-        "🔐 Visual interface for secure data-flow control – DAC / MAC / RBAC / ABAC"
+        "🔐 Visual interface for secure data-flow control – DAC / MAC / RBAC"
     ))
 
     tabs = st.tabs([
@@ -854,7 +854,6 @@ def main():
                 "MAC: `AddSub S1` · `AddObj O1` · `AddCh S1 R O1` ·  \n"
                 "China-Wall: `AddSub S1` · `AddObj O1` · `Never {S1, O1}` · `AddCh S1 R O1`   \n"
                 "RBAC: `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1` · `AddSub S1 R1`  \n"
-                "ABAC : `AddEnt Ripama` · `Luigi` · `AddCh Ripama Luigi`  \n"
         )
     )
     st.text_input("C:\\>", key="cmd_input",
