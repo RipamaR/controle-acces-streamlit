@@ -840,8 +840,8 @@ def main():
     # ------- Onglet Terminal -------
     with tabs[1]:
     # ======================= AIDE COMMANDES =======================
-    st.markdown(
-        tr(
+        st.markdown(
+            tr(
             # -------- Version française --------
             "### 📌 Mode d'emploi des commandes (Terminal)\n"
             "Pour exécuter les commandes, suivez les étapes propres à chaque modèle. "
