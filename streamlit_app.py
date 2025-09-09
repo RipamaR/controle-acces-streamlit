@@ -839,21 +839,59 @@ def main():
 
     # ------- Onglet Terminal -------
     with tabs[1]:
-         st.markdown(
-            tr(
-                "Entre une commande puis **Entrée**  \n"
-                "Version Entité : `AddEnt E1` · `AddEnt E2` · `AddCh E1 E2`  \n"
-                "DAC : `AddSub S2` · `AddSub S3` · `S2 AddObj O2`· `S2 Grant S3 O2 R`  \n"
-                "MAC: `AddSub S1` · `AddObj O1` · `AddCh S1 R O1` \n"
-                "China-Wall : `AddSub S1` · `AddObj O1` · `Never {S1, O1}`· `AddCh S1 R O1`  \n"
-                "RBAC: `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1`· `AddSub S1 R1`  \n"
-                "ABAC : `AddEnt Ripama` · `Luigi` · `AddCh Ripama Luigi`  \n",
-                "Type a command then **Enter**  \n"
-                "Entity version: `AddEnt E1` · `AddEnt E2` · `AddCh E1 E2`  \n"
-                "DAC: `AddSub S2` · `AddSub S3` · `S2 AddObj O2` · `S2 Grant S3 O2 R`  \n"
-                "MAC: `AddSub S1` · `AddObj O1` · `AddCh S1 R O1` ·  \n"
-                "China-Wall: `AddSub S1` · `AddObj O1` · `Never {S1, O1}` · `AddCh S1 R O1`   \n"
-                "RBAC: `AddObj O1` · `AddRole R1` · `GrantPermission R1 R O1` · `AddSub S1 R1`  \n"
+    st.markdown(
+        tr(
+            # -------- Version française --------
+            "### 📌 Mode d'emploi des commandes\n"
+            "Pour exécuter les commandes, vous devez suivre les étapes propres à chaque modèle. "
+            "Vous entrez la commande puis appuyez sur **Entrée**.  \n\n"
+            "**VERSION ENTITÉ**  \n"
+            "Étape1: création des entités → `AddEnt E1` · `AddEnt E2`  \n"
+            "Étape2: création des canaux → `AddCh E1 E2`  \n\n"
+            "**MODÈLE DAC**  \n"
+            "Étape1: création des sujets → `AddSub S2` · `AddSub S3`  \n"
+            "Étape2: création des objets par un propriétaire → `S2 AddObj O2`  \n"
+            "Étape3: attribution de permission du propriétaire à un sujet → `S2 Grant S3 O2 R`  \n\n"
+            "**MODÈLE MAC**  \n"
+            "Étape1: création des sujets → `AddSub S1`  \n"
+            "Étape2: création des objets → `AddObj O1`  \n"
+            "Étape3: création des canaux → `AddCh S1 R O1`  \n\n"
+            "**CHINA-WALL**  \n"
+            "Étape1: création des sujets → `AddSub S1`  \n"
+            "Étape2: création des objets → `AddObj O1`  \n"
+            "Étape3: condition de restriction → `Never {S1, O1}`  \n"
+            "Étape4: création des canaux → `AddCh S1 R O1`  \n\n"
+            "**MODÈLE RBAC**  \n"
+            "Étape1: création des objets → `AddObj O1`  \n"
+            "Étape2: création des rôles → `AddRole R1`  \n"
+            "Étape3: attribution de permission au rôle sur l’objet → `GrantPermission R1 R O1`  \n"
+            "Étape4: création d’un sujet avec rôle attribué → `AddSub S1 R1`  \n\n"
+        ,
+            # -------- English version --------
+            "### 📌 Command usage guide\n"
+            "To execute commands, you must follow the steps specific to each model. "
+            "Enter the command and press **Enter**.  \n\n"
+            "**ENTITY VERSION**  \n"
+            "Step1: create entities → `AddEnt E1` · `AddEnt E2`  \n"
+            "Step2: create channels → `AddCh E1 E2`  \n\n"
+            "**DAC MODEL**  \n"
+            "Step1: create subjects → `AddSub S2` · `AddSub S3`  \n"
+            "Step2: create objects by an owner → `S2 AddObj O2`  \n"
+            "Step3: assign permission from owner to a subject → `S2 Grant S3 O2 R`  \n\n"
+            "**MAC MODEL**  \n"
+            "Step1: create subjects → `AddSub S1`  \n"
+            "Step2: create objects → `AddObj O1`  \n"
+            "Step3: create channels → `AddCh S1 R O1`  \n\n"
+            "**CHINA-WALL**  \n"
+            "Step1: create subjects → `AddSub S1`  \n"
+            "Step2: create objects → `AddObj O1`  \n"
+            "Step3: restriction condition → `Never {S1, O1}`  \n"
+            "Step4: create channels → `AddCh S1 R O1`  \n\n"
+            "**RBAC MODEL**  \n"
+            "Step1: create objects → `AddObj O1`  \n"
+            "Step2: create roles → `AddRole R1`  \n"
+            "Step3: assign permission to role on object → `GrantPermission R1 R O1`  \n"
+            "Step4: create subject with assigned role → `AddSub S1 R1`  \n\n"
         )
     )
     st.text_input("C:\\>", key="cmd_input",
