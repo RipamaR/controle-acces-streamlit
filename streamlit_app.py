@@ -839,61 +839,107 @@ def main():
 
     # ------- Onglet Terminal -------
     with tabs[1]:
-         st.markdown(
-            tr(
+    # ======================= AIDE COMMANDES =======================
+    st.markdown(
+        tr(
             # -------- Version française --------
-            "### 📌 Mode d'emploi des commandes\n"
-            "Pour exécuter les commandes, vous devez suivre les étapes propres à chaque modèle. "
+            "### 📌 Mode d'emploi des commandes (Terminal)\n"
+            "Pour exécuter les commandes, suivez les étapes propres à chaque modèle. "
             "Vous entrez la commande puis appuyez sur **Entrée**.  \n\n"
+
             "**VERSION ENTITÉ**  \n"
             "Étape1: création des entités → `AddEnt E1` · `AddEnt E2`  \n"
             "Étape2: création des canaux → `AddCh E1 E2`  \n\n"
+
             "**MODÈLE DAC**  \n"
             "Étape1: création des sujets → `AddSub S2` · `AddSub S3`  \n"
             "Étape2: création des objets par un propriétaire → `S2 AddObj O2`  \n"
             "Étape3: attribution de permission du propriétaire à un sujet → `S2 Grant S3 O2 R`  \n\n"
+
             "**MODÈLE MAC**  \n"
             "Étape1: création des sujets → `AddSub S1`  \n"
             "Étape2: création des objets → `AddObj O1`  \n"
             "Étape3: création des canaux → `AddCh S1 R O1`  \n\n"
+
             "**CHINA-WALL**  \n"
             "Étape1: création des sujets → `AddSub S1`  \n"
             "Étape2: création des objets → `AddObj O1`  \n"
             "Étape3: condition de restriction → `Never {S1, O1}`  \n"
             "Étape4: création des canaux → `AddCh S1 R O1`  \n\n"
+
             "**MODÈLE RBAC**  \n"
             "Étape1: création des objets → `AddObj O1`  \n"
             "Étape2: création des rôles → `AddRole R1`  \n"
             "Étape3: attribution de permission au rôle sur l’objet → `GrantPermission R1 R O1`  \n"
             "Étape4: création d’un sujet avec rôle attribué → `AddSub S1 R1`  \n\n"
+
+            "---\n"
+            "### 📂 Mode d'emploi pour l’option Excel\n"
+            "Vous pouvez charger un fichier **Excel** contenant :\n"
+            "- **RBAC** → colonnes `Source`, `Permission`, `Target`, `Role` (et facultatif `Heritage`).\n"
+            "   Exemple :\n"
+            "   | Source | Permission | Target | Role |\n"
+            "   |--------|------------|--------|------|\n"
+            "   | S1     | R          | O1     | R1   |\n"
+            "   | S2     | W          | O2     | R2   |\n\n"
+            "- **Entités** → colonnes `Entity1`, `Entity2`.\n"
+            "   Exemple :\n"
+            "   | Entity1 | Entity2 |\n"
+            "   |---------|---------|\n"
+            "   | E1      | E2      |\n"
+            "   | E2      | E3      |\n\n"
+            "⚠️ Les entités sont normalisées automatiquement (ex: `e01` → `E1`).\n"
         ,
             # -------- English version --------
-            "### 📌 Command usage guide\n"
-            "To execute commands, you must follow the steps specific to each model. "
-            "Enter the command and press **Enter**.  \n\n"
+            "### 📌 Command usage guide (Terminal)\n"
+            "To execute commands, follow the steps specific to each model. "
+            "Enter the command then press **Enter**.  \n\n"
+
             "**ENTITY VERSION**  \n"
             "Step1: create entities → `AddEnt E1` · `AddEnt E2`  \n"
             "Step2: create channels → `AddCh E1 E2`  \n\n"
+
             "**DAC MODEL**  \n"
             "Step1: create subjects → `AddSub S2` · `AddSub S3`  \n"
             "Step2: create objects by an owner → `S2 AddObj O2`  \n"
             "Step3: assign permission from owner to a subject → `S2 Grant S3 O2 R`  \n\n"
+
             "**MAC MODEL**  \n"
             "Step1: create subjects → `AddSub S1`  \n"
             "Step2: create objects → `AddObj O1`  \n"
             "Step3: create channels → `AddCh S1 R O1`  \n\n"
+
             "**CHINA-WALL**  \n"
             "Step1: create subjects → `AddSub S1`  \n"
             "Step2: create objects → `AddObj O1`  \n"
             "Step3: restriction condition → `Never {S1, O1}`  \n"
             "Step4: create channels → `AddCh S1 R O1`  \n\n"
+
             "**RBAC MODEL**  \n"
             "Step1: create objects → `AddObj O1`  \n"
             "Step2: create roles → `AddRole R1`  \n"
             "Step3: assign permission to role on object → `GrantPermission R1 R O1`  \n"
             "Step4: create subject with assigned role → `AddSub S1 R1`  \n\n"
+
+            "---\n"
+            "### 📂 Excel option usage\n"
+            "You can load an **Excel** file containing:\n"
+            "- **RBAC** → columns `Source`, `Permission`, `Target`, `Role` (and optional `Heritage`).\n"
+            "   Example:\n"
+            "   | Source | Permission | Target | Role |\n"
+            "   |--------|------------|--------|------|\n"
+            "   | S1     | R          | O1     | R1   |\n"
+            "   | S2     | W          | O2     | R2   |\n\n"
+            "- **Entities** → columns `Entity1`, `Entity2`.\n"
+            "   Example:\n"
+            "   | Entity1 | Entity2 |\n"
+            "   |---------|---------|\n"
+            "   | E1      | E2      |\n"
+            "   | E2      | E3      |\n\n"
+            "⚠️ Entities are automatically normalized (e.g. `e01` → `E1`).\n"
         )
     )
+
     st.text_input("C:\\>", key="cmd_input",
                   placeholder=tr("Ex: AddSub S1 R1", "Ex: AddSub S1 R1"),
                   on_change=_run_command_callback)
