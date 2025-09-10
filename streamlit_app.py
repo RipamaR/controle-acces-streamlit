@@ -10,6 +10,26 @@
 #  - Commandes AssignRole / UnassignRole / édition entités/objets/rôles
 # -----------------------------------------------------------
 
+# Forcer l'interface en plein écran (pas centrée, largeur max)
+st.markdown("""
+<style>
+/* Conteneur principal pleine largeur */
+.main .block-container {
+    max-width: 100% !important;
+    padding-left: 2rem;
+    padding-right: 2rem;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+/* En-tête (titre) aligné à gauche */
+h1, h2, h3, h4, h5, h6 {
+    text-align: left !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 import io
 import re
 import time
