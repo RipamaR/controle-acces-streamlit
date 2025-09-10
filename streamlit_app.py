@@ -265,7 +265,7 @@ var options = {
 }
 """
 
-def  _pyvis_show(net, height="900", width="100%"):
+def  _pyvis_show(net, height="height", width="100%"):
     net.set_options(PYVIS_OPTIONS)
     html = net.generate_html()
     st_html(html, height=height, width=width, scrolling=True)
@@ -296,7 +296,7 @@ def draw_main_graph(df: pd.DataFrame):
             node_pos[n] = (x_positions[xi % len(x_positions)], -current_y)
             xi += 1
         current_y += y_step
-    net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
+    net = Network(notebook=False, height="heightpx", width="100%", directed=True, cdn_resources="in_line")
     all_nodes = set(adj.keys()) | {v for lst in adj.values() for v in lst}
     for n in sorted(all_nodes):
         shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
@@ -416,7 +416,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         if si is not None and di is not None:
             net.add_edge(base_idx + si, base_idx + di, arrows="to")
 
-    _pyvis_show(net, height="900", width="100%")
+    _pyvis_show(net, height="1600t", width="100%")
 
 # =============== PROPAGATION RBAC (fichiers) =================
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
