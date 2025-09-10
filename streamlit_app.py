@@ -67,8 +67,8 @@ st.session_state.lang = lang_selected
 
 # Titre
 st.title(tr(
-    "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC",
-    "🔐 Graphical interface for secure data flow control representation – DAC / MAC / RBAC / ABAC"
+    "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC /Muraille de chine / RBAC ",
+    "🔐 Graphical interface for secure data flow control representation – DAC / MAC /China-Wall / RBAC "
 ))
 
 # ===================== ÉTAT GLOBAL =========================
