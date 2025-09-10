@@ -1065,12 +1065,6 @@ def main():
         "Graphical interface for secure data-flow control representation – DAC / MAC / RBAC / ABAC"
     ))
 
-    # Sélecteur de langue (FR/EN)
-    st.session_state.lang = st.radio(
-        tr("Langue de l’interface", "Interface language"),
-        options=["FR", "EN"], horizontal=True, index=0 if st.session_state.lang == "FR" else 1
-    )
-
     tabs = st.tabs([tr("📂 Fichier Excel", "📂 Excel File"),
                     tr("⌨️ Terminal", "⌨️ Terminal"),
                     tr("📊 Perf", "📊 Perf")])
