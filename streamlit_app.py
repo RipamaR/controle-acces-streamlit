@@ -12,23 +12,6 @@
 
 # Forcer l'interface en plein écran (pas centrée, largeur max)
 # Forcer l'interface en plein écran (pas centrée, largeur max)
-st.markdown("""
-<style>
-/* Conteneur principal pleine largeur */
-.main .block-container {
-    max-width: 100% !important;
-    padding-left: 2rem;
-    padding-right: 2rem;
-    padding-top: 1rem;
-    padding-bottom: 1rem;
-}
-
-/* En-tête (titre) aligné à gauche */
-h1, h2, h3, h4, h5, h6 {
-    text-align: left !important;
-}
-</style>
-""", unsafe_allow_html=True)
 
 
 
@@ -42,6 +25,33 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
+
+# ===================== CONFIG UI ===========================
+st.set_page_config(
+    page_title="Interface graphique pour la représentation de contrôle de flux de données sécuritaires – RBAC / DAC / China-Wall",
+    layout="wide"
+)
+
+# --- Pleine largeur + titres alignés à gauche (ne pas indenter) ---
+FULL_WIDTH_CSS = """
+<style>
+/* Force la zone principale à utiliser toute la largeur */
+section.main > div.block-container {
+    max-width: 100% !important;
+    padding-left: 2rem;
+    padding-right: 2rem;
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+}
+
+/* En-têtes à gauche (pas centrés) */
+h1, h2, h3, h4, h5, h6 {
+    text-align: left !important;
+}
+</style>
+"""
+st.markdown(FULL_WIDTH_CSS, unsafe_allow_html=True)
+
 
 # ===================== i18n (FR/EN) ========================
 # Langue en session
