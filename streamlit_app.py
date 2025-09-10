@@ -28,14 +28,37 @@ st.set_page_config(
 )
 
 # ===================== I18N (FR / EN) ======================
-def init_lang():
-    if "lang" not in st.session_state:
-        st.session_state.lang = "FR"
+# ===================== i18n (FR/EN) ========================
+# Langue en session
+if "lang" not in st.session_state:
+    st.session_state.lang = "fr"  # défaut: français
 
-def tr(fr: str, en: str) -> str:
-    return fr if st.session_state.get("lang", "FR") == "FR" else en
+def tr(fr: str, en: str, **kw) -> str:
+    """Retourne la version FR ou EN et applique .format(**kw) si présent."""
+    s = fr if st.session_state.lang == "fr" else en
+    try:
+        return s.format(**kw)
+    except Exception:
+        return s
 
-init_lang()
+# Exemple d'utilisation :
+st.sidebar.radio(
+    "🌐 Choisir la langue / Choose language",
+    options=["fr", "en"],
+    index=0 if st.session_state.lang == "fr" else 1,
+    key="lang"
+)
+
+st.title(tr(
+    "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC",
+    "🔐 Graphical interface for secure data flow control representation – DAC / MAC / RBAC / ABAC"
+))
+
+st.markdown(tr(
+    "Bienvenue dans l'interface ! Vous pouvez exécuter des commandes en français.",
+    "Welcome to the interface! You can execute commands in English."
+))
+
 
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
