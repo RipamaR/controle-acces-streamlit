@@ -606,15 +606,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     command, args = parts[0], parts[1:]
     out = [tr("💬 Commande exécutée", "💬 Command executed") + f": C:\\> {line}"]
 
-    # -------- PERF --------
-    if command == "EvalPerf":
-        total = len(st.session_state.sujets_definis | st.session_state.objets_definis)
-        if total == 0:
-            out.append(tr("⚠️ Aucune entité définie. Créez des sujets/objets d’abord.", "⚠️ No entities defined. Please create subjects or objects first."))
-            return df, "\n".join(out)
-        evaluer_performance_interface(total)
-        out.append(tr("✅ Graphique de performance généré.", "✅ Performance chart generated."))
-        return df, "\n".join(out)
 
     # ==================== ENTITÉS (générique) ====================
     if command == "AddEnt" and len(args) == 1:
@@ -1089,8 +1080,7 @@ def excel_help_text() -> str:
 def main():
 
     tabs = st.tabs([tr("📂 Fichier Excel", "📂 Excel File"),
-                    tr("⌨️ Terminal", "⌨️ Terminal"),
-                    tr("📊 Perf", "📊 Perf")])
+                    tr("⌨️ Terminal", "⌨️ Terminal")
 
     # ------- Onglet Excel -------
     with tabs[0]:
@@ -1138,13 +1128,6 @@ def main():
         st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
         process_data_display(st.session_state.global_data, key_prefix="terminal")
 
-    # ------- Onglet Perf -------
-    with tabs[2]:
-        st.write(tr("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.",
-                    "Timing (SCC vs propagation) on a sparse random graph."))
-        n = st.slider(tr("Nombre d'entités", "Number of entities"), 20, 2000, 200, step=20)
-        if st.button(tr("Lancer EvalPerf", "Run EvalPerf")):
-            evaluer_performance_interface(n)
 
 if __name__ == "__main__":
     main()
