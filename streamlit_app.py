@@ -416,7 +416,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         if si is not None and di is not None:
             net.add_edge(base_idx + si, base_idx + di, arrows="to")
 
-    _pyvis_show(net, height="1600", width="100%")
+    _pyvis_show(net, height="1600px", width="100%")
 
 # =============== PROPAGATION RBAC (fichiers) =================
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
