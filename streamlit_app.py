@@ -265,7 +265,7 @@ var options = {
 }
 """
 
-def _pyvis_show(net: Network, height=900, width=1600):
+def _pyvis_show(net: Network, height=2000, width=1600):
     net.set_options(PYVIS_OPTIONS)
     html = net.generate_html()
     st_html(html, height=height, width=width, scrolling=True)
