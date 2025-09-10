@@ -21,13 +21,6 @@ import streamlit as st
 from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
 
-# ===================== CONFIG UI ===========================
-st.set_page_config(
-    page_title="Interface graphique pour la représentation de contrôle de flux de données sécuritaires – RBAC / DAC / China-Wall",
-    layout="wide"
-)
-
-# ===================== I18N (FR / EN) ======================
 # ===================== i18n (FR/EN) ========================
 # Langue en session
 if "lang" not in st.session_state:
