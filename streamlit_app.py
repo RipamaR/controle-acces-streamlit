@@ -1,14 +1,12 @@
 # streamlit_app.py
 # -----------------------------------------------------------
-# Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC
+# Contrôle d'accès (RBAC / DAC / China-Wall) – Streamlit
 # Version intégrée avec:
 #  - Graphe principal + graphe par composant (SCC)
 #  - Tableau entités/étiquettes trié
 #  - Terminal de commandes
 #  - EvalPerf (benchmark Tarjan / propagation)
 #  - Chargement Excel (RBAC ou Entités)
-#  - China Wall (règles d’incompatibilité)
-#  - i18n (Français / English)
 # -----------------------------------------------------------
 
 import io
@@ -23,23 +21,7 @@ from pyvis.network import Network
 from streamlit.components.v1 import html as st_html
 
 # ===================== CONFIG UI ===========================
-st.set_page_config(
-    page_title="Interface graphique – DAC / MAC / RBAC / ABAC",
-    layout="wide"
-)
-
-# ===================== i18n (FR/EN) ========================
-# Langue en session
-if "lang" not in st.session_state:
-    st.session_state.lang = "fr"  # défaut: français
-
-def tr(fr: str, en: str, **kw) -> str:
-    """Retourne la version FR ou EN et applique .format(**kw) si présent."""
-    s = fr if st.session_state.lang == "fr" else en
-    try:
-        return s.format(**kw)
-    except Exception:
-        return s
+st.set_page_config(page_title="Interface graphique pour la représentation de contrôle de flux de données sécuritaires – RBAC / DAC / China-Wall", layout="wide")
 
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
@@ -61,6 +43,7 @@ def init_state():
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
 init_state()
 
 # ===================== NORMALISATION =======================
@@ -137,7 +120,7 @@ def tarjan(V, adj):
             strongconnect(v)
     return scc, component_map
 
-# ---- Propagation CORRIGÉE : sur le DAG de composantes ----
+# ---- Propagation sur le DAG de composantes (condensation) ----
 def propagate_labels(components, adj, component_map):
     comp_index = {frozenset(c): i for i, c in enumerate(components)}
     labels = [set(c) for c in components]
@@ -155,7 +138,6 @@ def propagate_labels(components, adj, component_map):
         for v in Gc.successors(u):
             labels[v] |= labels[u]
     return labels
-# ----------------------------------------------------------
 
 def simplify_relations(labels):
     reduced = nx.DiGraph()
@@ -199,11 +181,11 @@ def _fmt_set(ss: set[str]) -> str:
 
 def display_entities_table(components, labels):
     data = {
-        tr("Entités", "Entities"): [", ".join(sorted(c)) for c in components],
-        tr("Leurs étiquettes", "Their labels"): [_fmt_set(lbl | set(comp)) for comp, lbl in zip(components, labels)],
-        "_NBL_": [len(lbl) for lbl in labels],
+        "Entities": [", ".join(sorted(c)) for c in components],
+        "Their labels": [_fmt_set(lbl | set(comp)) for comp, lbl in zip(components, labels)],
+        "Nombre d'étiquettes": [len(lbl) for lbl in labels],
     }
-    df = pd.DataFrame(data).sort_values(by="_NBL_", ascending=False).drop(columns=["_NBL_"])
+    df = pd.DataFrame(data).sort_values(by="Nombre d'étiquettes", ascending=False).drop(columns=["Nombre d'étiquettes"])
     st.dataframe(df, use_container_width=True)
 
 def display_role_table_streamlit(df: pd.DataFrame):
@@ -241,11 +223,11 @@ def _pyvis_show(net: Network, height=900, width=1600):
 # =============== GRAPHE PRINCIPAL ===========================
 def draw_main_graph(df: pd.DataFrame):
     if df.empty:
-        st.info(tr("Aucune donnée pour générer le graphe.", "No data to draw the graph."))
+        st.info("Aucune donnée pour générer le graphe.")
         return
     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
     if df_eff.empty:
-        st.info(tr("Aucune relation R/W à afficher.", "No R/W relation to display."))
+        st.info("Aucune relation R/W à afficher.")
         return
     adj = apply_permissions(df_eff)
     G_adj = nx.DiGraph()
@@ -279,7 +261,7 @@ def draw_main_graph(df: pd.DataFrame):
 def draw_component_graph(df: pd.DataFrame, component_nodes: set):
     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
     if df_eff.empty:
-        st.info(tr("Aucune relation R/W à afficher.", "No R/W relation to display."))
+        st.info("Aucune relation R/W à afficher.")
         return
     adj = apply_permissions(df_eff)
     net = Network(notebook=False, height="750px", width="100%", directed=True, cdn_resources="in_line")
@@ -312,7 +294,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     cur_y_right = 0
     node_indices = {}
     G1 = nx.DiGraph()
-    role_to_subject = {s: role_data.get(s, tr("Sans rôle", "No role")) for s in allowed_subjects}
+    role_to_subject = {s: role_data.get(s, "No role") for s in allowed_subjects}
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
 
@@ -321,7 +303,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
             subjects = [s for s in component if s in allowed_subjects]
             objects  = [o for o in component if o in allowed_objects]
             for subj in subjects:
-                roles = role_to_subject.get(subj, tr("Sans rôle", "No role"))
+                roles = role_to_subject.get(subj, "No role")
                 combined = _fmt_set(label | {subj})
                 text = f'{subj}({roles}):\n{combined}'
                 net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-cur_y_left*y_gap)
@@ -420,10 +402,7 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
     df_raw = pd.read_excel(io.BytesIO(file_bytes))
     cols = {c.strip().lower(): c for c in df_raw.columns}
     if not {"entity1", "entity2"} <= set(cols.keys()):
-        raise ValueError(tr(
-            "Le fichier 'entités' doit contenir les colonnes Entity1 et Entity2.",
-            "The 'entities' file must contain columns Entity1 and Entity2."
-        ))
+        raise ValueError("Le fichier 'entités' doit contenir les colonnes Entity1 et Entity2.")
     col_e1, col_e2 = cols["entity1"], cols["entity2"]
     rows = []
     for _, row in df_raw.iterrows():
@@ -432,10 +411,7 @@ def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
         if e1 and e2:
             rows.append({"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None})
     if not rows:
-        raise ValueError(tr(
-            "Aucune paire valide (Entity1, Entity2) trouvée.",
-            "No valid (Entity1, Entity2) pair found."
-        ))
+        raise ValueError("Aucune paire valide (Entity1, Entity2) trouvée.")
     return normalize_df(pd.DataFrame(rows, columns=["Source", "Permission", "Target", "Role", "Heritage"]))
 
 # =============== PERF (Tarjan vs Propagation) ===============
@@ -471,69 +447,21 @@ def evaluer_performance_interface(nb_entites: int):
 
     fig, ax = plt.subplots(figsize=(6,4))
     ax.bar([0,1], [t_tarjan, t_labels])
-    ax.set_xticks([0,1]); ax.set_xticklabels([tr("SCC (Tarjan)","SCC (Tarjan)"), tr("Propagation","Propagation")])
-    ax.set_ylabel(tr("Temps (s)", "Time (s)"))
-    ax.set_title(tr("Performance pour {n} entités", "Performance for {n} entities").format(n=nb_entites))
+    ax.set_xticks([0,1]); ax.set_xticklabels(["SCC (Tarjan)","Propagation"])
+    ax.set_ylabel("Temps (s)")
+    ax.set_title(f"Performance pour {nb_entites} entités")
     st.pyplot(fig)
-
-# =============== Vérification China Wall ====================
-def check_china_wall(df_after: pd.DataFrame):
-    """
-    Retourne (ok, message). ok=False si une règle est violée.
-    """
-    try:
-        df_expanded = propagate_rbac_from_excel(df_after)
-        df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
-        if df_effective.empty:
-            return True, None
-
-        adj = apply_permissions(df_effective)
-        active_nodes = set(adj.keys())
-        for lst in adj.values(): active_nodes.update(lst)
-        V = sorted(active_nodes)
-        scc, cmap = tarjan(V, adj)
-        labels = propagate_labels(scc, adj, cmap)
-
-        comp_sets = [lbl | set(comp) for comp, lbl in zip(scc, labels)]
-
-        for comp in comp_sets:
-            for interdit in st.session_state.interdictions_globales:
-                if set(interdit).issubset(comp):
-                    return False, tr(
-                        "⛔ CHINA WALL ERROR: Violation globale pour {x}",
-                        "⛔ CHINA WALL ERROR: Global restriction violated for {x}",
-                        x=interdit
-                    )
-
-        for comp in comp_sets:
-            for ent, combos in st.session_state.interdictions_entites.items():
-                if ent in comp:
-                    for interdit in combos:
-                        if set(interdit).issubset(comp):
-                            return False, tr(
-                                "⛔ CHINA WALL ERROR: Violation pour {e} : {x}",
-                                "⛔ CHINA WALL ERROR: Restriction violated for {e}: {x}",
-                                e=ent, x=interdit
-                            )
-
-        return True, None
-    except Exception as e:
-        return True, tr(
-            "⚠️ Vérification China Wall ignorée (erreur: {err})",
-            "⚠️ China Wall check skipped (error: {err})",
-            err=e
-        )
 
 # =============== VISUALISATION COMPLÈTE ====================
 def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     if df is None or df.empty:
-        st.info(tr("Aucune donnée à afficher.", "Nothing to display."))
+        st.info("Aucune donnée à afficher.")
         return
 
     df_expanded = propagate_rbac_from_excel(df)
     df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
     if df_effective.empty:
-        st.info(tr("Aucune relation R/W à afficher.", "No R/W relation to display."))
+        st.info("Aucune relation R/W à afficher.")
         return
 
     adj = apply_permissions(df_effective)
@@ -545,39 +473,61 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     labels = propagate_labels(scc, adj, cmap)
     simplified = simplify_relations(labels)
 
-    st.subheader(tr("Table des entités et étiquettes", "Entities & labels table"))
+    st.subheader("Table des entités et étiquettes")
     display_entities_table(scc, labels)
 
-    st.subheader(tr("Table RBAC (si rôles)", "RBAC table (if roles)"))
+    st.subheader("Table RBAC (si rôles)")
     display_role_table_streamlit(df_expanded)
 
     st.markdown("---")
-    st.subheader(tr("Vue principale (toutes arêtes R/W)", "Main view (all R/W edges)"))
+    st.subheader("Graphe combiné (entités & classes d'équivalence)")
+    role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
+    draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
+
+    st.markdown("---")
+    st.subheader("Vue principale (toutes arêtes R/W)")
     draw_main_graph(df_expanded)
 
     st.markdown("---")
-    st.subheader(tr("Composants fortement connexes", "Strongly connected components"))
+    st.subheader("Composants fortement connexes")
     if not scc:
-        st.info(tr("Aucun composant.", "No component."))
+        st.info("Aucun composant.")
         return
 
     cols = st.columns(4)
     for i, comp in enumerate(scc):
         label = ", ".join(sorted(comp))
-        if cols[i % 4].button(tr("Voir: {x}", "View: {x}").format(x=label), key=f"{key_prefix}_sccbtn_{i}"):
+        if cols[i % 4].button(f"Voir: {label}", key=f"{key_prefix}_sccbtn_{i}"):
             st.session_state.selected_component = i
 
     if st.session_state.selected_component is not None:
-        st.success(tr(
-            "Composant sélectionné: {x}",
-            "Selected component: {x}"
-        ).format(x=', '.join(sorted(scc[st.session_state.selected_component]))))
+        st.success(f"Composant sélectionné: {', '.join(sorted(scc[st.session_state.selected_component]))}")
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
+        if st.button("↩️ Revenir au graphe principal", key=f"{key_prefix}_back_to_main_graph"):
+            st.session_state.selected_component = None
 
-    st.markdown("---")
-    st.subheader(tr("Graphe combiné (entités & classes d'équivalence)", "Combined graph (entities & equivalence classes)"))
-    role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
-    draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
+# ===================== CHINA-WALL CHECK =====================
+def _would_violate_china_wall(df_candidate: pd.DataFrame) -> tuple[bool, str | None]:
+    dfe = df_candidate[df_candidate["Permission"].isin(["R", "W"])].copy()
+    if dfe.empty:
+        return False, None
+    adj = apply_permissions(dfe)
+    V = sorted(set(adj.keys()) | {v for vs in adj.values() for v in vs})
+    if not V:
+        return False, None
+    scc, cmap = tarjan(V, adj)
+    labels = propagate_labels(scc, adj, cmap)
+
+    for comp in labels:
+        for interdit in st.session_state.interdictions_globales:
+            if set(interdit).issubset(comp):
+                return True, f"⛔ CHINA WALL: restriction globale violée pour {interdit}"
+        for ent, combos in st.session_state.interdictions_entites.items():
+            if ent in comp:
+                for interdit in combos:
+                    if set(interdit).issubset(comp):
+                        return True, f"⛔ CHINA WALL: restriction violée pour {ent}: {interdit}"
+    return False, None
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
@@ -588,54 +538,219 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
 
     df = ensure_cols(global_data.copy())
     line = (prompt or "").strip()
-    if not line: 
-        return df, tr("💬 Commande vide", "💬 Empty command")
+    if not line: return df, "💬 Empty command"
 
     parts = line.split()
     command, args = parts[0], parts[1:]
-    out = [tr("💬 Commande exécutée: C:\\> {x}", "💬 Command executed: C:\\> {x}").format(x=line)]
+    out = [f"💬 Command executed: C:\\> {line}"]
 
+    # -------- PERF --------
     if command == "EvalPerf":
         total = len(st.session_state.sujets_definis | st.session_state.objets_definis)
         if total == 0:
-            out.append(tr(
-                "⚠️ Aucune entité définie. Créez d'abord des sujets ou des objets.",
-                "⚠️ No entities defined. Please create subjects or objects first."
-            ))
+            out.append("⚠️ No entities defined. Please create subjects or objects first.")
             return df, "\n".join(out)
         evaluer_performance_interface(total)
-        out.append(tr("✅ Graphique de performance généré.", "✅ Performance chart generated."))
+        out.append("✅ Performance chart generated.")
         return df, "\n".join(out)
 
+    # ==================== ENTITÉS (générique) ====================
+    # AddEnt E1
+    if command == "AddEnt" and len(args) == 1:
+        e = _norm_entity(args[0])
+        if not e:
+            out.append("❌ Entité invalide."); return df, "\n".join(out)
+        exists = ((df["Source"] == e) | (df["Target"] == e)).any()
+        if exists:
+            out.append(f"ℹ️ L'entité '{e}' existe déjà."); return df, "\n".join(out)
+        df = pd.concat([df, pd.DataFrame([{"Source": e, "Permission": None, "Target": None, "Role": None, "Heritage": None}])], ignore_index=True)
+        out.append(f"✅ Entité '{e}' créée."); return df, "\n".join(out)
+
+    # RenameEnt E1 E1X
+    if command == "RenameEnt" and len(args) == 2:
+        old, new = _norm_entity(args[0]), _norm_entity(args[1])
+        if not old or not new:
+            out.append("❌ Usage: RenameEnt EOLD ENEW"); return df, "\n".join(out)
+        if not ((df["Source"] == old) | (df["Target"] == old)).any():
+            out.append(f"❌ Entité '{old}' introuvable."); return df, "\n".join(out)
+        df.loc[df["Source"] == old, "Source"] = new
+        df.loc[df["Target"] == old, "Target"] = new
+        if old in st.session_state.sujets_definis:
+            st.session_state.sujets_definis.discard(old); st.session_state.sujets_definis.add(new)
+        if old in st.session_state.objets_definis:
+            st.session_state.objets_definis.discard(old); st.session_state.objets_definis.add(new)
+        if old in st.session_state.interdictions_entites:
+            st.session_state.interdictions_entites[new] = st.session_state.interdictions_entites.pop(old)
+        for i, combo in enumerate(st.session_state.interdictions_globales):
+            st.session_state.interdictions_globales[i] = [new if x == old else x for x in combo]
+        out.append(f"✅ Entité renommée: {old} → {new}"); return df, "\n".join(out)
+
+    # AddCh E1 E2  (canal entité->entité, stocké comme R: E2 --R--> E1)
+    if command == "AddCh" and len(args) == 2:
+        e1, e2 = _norm_entity(args[0]), _norm_entity(args[1])
+        if not e1 or not e2:
+            out.append("❌ Usage: AddCh E1 E2"); return df, "\n".join(out)
+        temp = pd.concat([df, pd.DataFrame([{"Source": e2, "Permission": "R", "Target": e1, "Role": None, "Heritage": None}])], ignore_index=True)
+        violated, msg = _would_violate_china_wall(temp)
+        if violated:
+            out.append(f"⛔ Bloqué : {msg}"); return df, "\n".join(out)
+        df = temp
+        out.append(f"✅ Canal ajouté: {e1} ←R– {e2}"); return df, "\n".join(out)
+
+    # DelCh E1 E2
+    if command == "DelCh" and len(args) == 2:
+        e1, e2 = _norm_entity(args[0]), _norm_entity(args[1])
+        before = len(df)
+        df = df[~((df["Source"] == e2) & (df["Permission"] == "R") & (df["Target"] == e1))]
+        out.append(f"🗑️ Canaux supprimés: {before - len(df)}"); return df, "\n".join(out)
+
+    # DelEnt E1
+    if command == "DelEnt" and len(args) == 1:
+        e = _norm_entity(args[0])
+        before = len(df)
+        df = df[~((df["Source"] == e) | (df["Target"] == e))]
+        st.session_state.sujets_definis.discard(e)
+        st.session_state.objets_definis.discard(e)
+        st.session_state.subject_roles.pop(e, None)
+        st.session_state.interdictions_entites.pop(e, None)
+        st.session_state.interdictions_globales = [
+            [x for x in combo if x != e] for combo in st.session_state.interdictions_globales
+        ]
+        out.append(f"🗑️ Entité '{e}' supprimée ({before - len(df)} ligne(s))."); return df, "\n".join(out)
+
+    # ======================= RBAC / DAC / MAC =======================
     if command == "AddObj" and len(args) == 1:
         obj = _norm_entity(args[0])
         if obj in st.session_state.objets_definis:
-            out.append(tr("ℹ️ L'objet '{x}' existe déjà.", "ℹ️ The object '{x}' already exists.").format(x=obj))
+            out.append(f"ℹ️ The object '{obj}' already exists.")
             return df, "\n".join(out)
         st.session_state.objets_definis.add(obj)
         df = pd.concat([df, pd.DataFrame([{"Source": None,"Permission":None,"Target":obj,"Role":None,"Heritage":None}], columns=df.columns)], ignore_index=True)
-        out.append(tr("✅ Objet '{x}' créé.", "✅ Object '{x}' created.").format(x=obj))
+        out.append(f"✅ Object '{obj}' created.")
         return df, "\n".join(out)
 
     if command == "AddRole":
         if len(args)!=1:
-            out.append(tr("❌ Usage: AddRole R1", "❌ Usage: AddRole R1")); return df, "\n".join(out)
+            out.append("❌ Usage: AddRole R1"); return df, "\n".join(out)
         role = args[0].strip()
         if role in st.session_state.roles_definis:
-            out.append(tr("ℹ️ Le rôle '{x}' existe déjà.", "ℹ️ Role '{x}' already exists.").format(x=role)); return df, "\n".join(out)
+            out.append(f"ℹ️ Role '{role}' already exists."); return df, "\n".join(out)
         st.session_state.roles_definis.add(role)
         st.session_state.role_permissions.setdefault(role, set())
-        out.append(tr("✅ Rôle '{x}' ajouté.", "✅ Role '{x}' added.").format(x=role)); return df, "\n".join(out)
+        out.append(f"✅ Role '{role}' added."); return df, "\n".join(out)
 
+    # ---- AJOUT ROLES SUR SUJET EXISTANT (NOUVEAU + ALIAS) ----
+    # AssignRole S1 R2 [R3 R4...]
+    if command in {"AssignRole", "AddRoleToSub", "AddSubRole", "AddRoleSub", "AddRoleToSubject"} and len(args) >= 2:
+        subj = _norm_entity(args[0])
+        roles = [r.strip() for r in args[1:] if r.strip()]
+        if subj not in st.session_state.sujets_definis:
+            out.append(f"❌ Subject '{subj}' not found. Use AddSub first."); return df, "\n".join(out)
+        # check unknown roles
+        unknown = [r for r in roles if r not in st.session_state.roles_definis]
+        if unknown:
+            out.append(f"❌ Unknown role(s): {', '.join(unknown)}"); return df, "\n".join(out)
+        st.session_state.subject_roles.setdefault(subj, set())
+        added = []
+        for role in roles:
+            if role not in st.session_state.subject_roles[subj]:
+                st.session_state.subject_roles[subj].add(role)
+                added.append(role)
+                for perm, obj in st.session_state.role_permissions.get(role, set()):
+                    if not ((df["Source"]==subj)&(df["Permission"]==perm)&(df["Target"]==obj)&(df["Role"]==role)).any():
+                        df = pd.concat([df, pd.DataFrame([{"Source":subj,"Permission":perm,"Target":obj,"Role":role,"Heritage":"Role"}])], ignore_index=True)
+        out.append("✅ Rôle(s) assigné(s) à "
+                   f"'{subj}': {', '.join(added) if added else '(aucun nouveau)'}")
+        return df, "\n".join(out)
+
+    # UnassignRole S1 R2 [R3...]
+    if command == "UnassignRole" and len(args) >= 2:
+        subj = _norm_entity(args[0])
+        roles = [r.strip() for r in args[1:] if r.strip()]
+        st.session_state.subject_roles.setdefault(subj, set())
+        removed_any = 0
+        for role in roles:
+            if role in st.session_state.subject_roles[subj]:
+                st.session_state.subject_roles[subj].discard(role)
+                before = len(df)
+                df = df[~((df["Source"]==subj) & (df["Role"]==role))]
+                removed_any += before - len(df)
+        out.append(f"🗑️ Rôle(s) retiré(s) de '{subj}'. Lignes supprimées: {removed_any}.")
+        return df, "\n".join(out)
+    # -------------------------------------------------------------
+
+    # NEW: DelRole / RenameRole
+    if command == "DelRole" and len(args) == 1:
+        r = args[0].strip()
+        if r not in st.session_state.roles_definis:
+            out.append(f"❌ Role '{r}' not found."); return df, "\n".join(out)
+        st.session_state.roles_definis.remove(r)
+        st.session_state.role_permissions.pop(r, None)
+        for s in list(st.session_state.subject_roles.keys()):
+            st.session_state.subject_roles[s].discard(r)
+        before = len(df)
+        df = df[~(df["Role"] == r)]
+        out.append(f"🗑️ Role '{r}' removed ({before - len(df)} ligne(s))."); return df, "\n".join(out)
+
+    if command == "RenameRole" and len(args) == 2:
+        old, new = args[0].strip(), args[1].strip()
+        if old not in st.session_state.roles_definis:
+            out.append(f"❌ Role '{old}' not found."); return df, "\n".join(out)
+        if new in st.session_state.roles_definis:
+            out.append(f"❌ Role '{new}' already exists."); return df, "\n".join(out)
+        st.session_state.roles_definis.remove(old); st.session_state.roles_definis.add(new)
+        st.session_state.role_permissions[new] = st.session_state.role_permissions.pop(old, set())
+        for s in st.session_state.subject_roles:
+            if old in st.session_state.subject_roles[s]:
+                st.session_state.subject_roles[s].remove(old)
+                st.session_state.subject_roles[s].add(new)
+        df.loc[df["Role"] == old, "Role"] = new
+        out.append(f"✅ Role renommé: {old} → {new}"); return df, "\n".join(out)
+
+    # NEW: DelSub / RenameSub / DelObj / RenameObj
+    if command == "DelSub" and len(args) == 1:
+        s = _norm_entity(args[0])
+        st.session_state.sujets_definis.discard(s)
+        st.session_state.subject_roles.pop(s, None)
+        before = len(df)
+        df = df[~(df["Source"] == s)]
+        out.append(f"🗑️ Sujet '{s}' supprimé ({before-len(df)} ligne(s))."); return df, "\n".join(out)
+
+    if command == "RenameSub" and len(args) == 2:
+        old, new = _norm_entity(args[0]), _norm_entity(args[1])
+        if old not in st.session_state.sujets_definis:
+            out.append(f"❌ Sujet '{old}' introuvable."); return df, "\n".join(out)
+        st.session_state.sujets_definis.discard(old); st.session_state.sujets_definis.add(new)
+        st.session_state.subject_roles[new] = st.session_state.subject_roles.pop(old, set())
+        df.loc[df["Source"] == old, "Source"] = new
+        out.append(f"✅ Sujet renommé: {old} → {new}"); return df, "\n".join(out)
+
+    if command == "DelObj" and len(args) == 1:
+        o = _norm_entity(args[0])
+        st.session_state.objets_definis.discard(o)
+        before = len(df)
+        df = df[~(df["Target"] == o)]
+        out.append(f"🗑️ Objet '{o}' supprimé ({before-len(df)} ligne(s))."); return df, "\n".join(out)
+
+    if command == "RenameObj" and len(args) == 2:
+        old, new = _norm_entity(args[0]), _norm_entity(args[1])
+        if old not in st.session_state.objets_definis:
+            out.append(f"❌ Objet '{old}' introuvable."); return df, "\n".join(out)
+        st.session_state.objets_definis.discard(old); st.session_state.objets_definis.add(new)
+        df.loc[df["Target"] == old, "Target"] = new
+        df.loc[(df["Permission"].isin(["R","W"])) & (df["Source"] == old), "Source"] = new
+        out.append(f"✅ Objet renommé: {old} → {new}"); return df, "\n".join(out)
+
+    # RBAC existants: AddSub / GrantPermission / RevokePermission
     if command == "AddSub":
         if len(args)<1:
-            out.append(tr("❌ Usage: AddSub S1 [R1]", "❌ Usage: AddSub S1 [R1]")); return df, "\n".join(out)
+            out.append("❌ Usage: AddSub S1 [R1]"); return df, "\n".join(out)
         subject = _norm_entity(args[0])
         role = args[1].strip() if len(args)>1 else None
         if subject in st.session_state.sujets_definis:
-            out.append(tr("ℹ️ Le sujet '{x}' existe déjà.", "ℹ️ The subject '{x}' already exists.").format(x=subject)); return df, "\n".join(out)
+            out.append(f"ℹ️ The Subject '{subject}' already exists."); return df, "\n".join(out)
         if role and role not in st.session_state.roles_definis:
-            out.append(tr("⛔ Erreur: le rôle '{x}' n'existe pas.", "⛔ Error: Role '{x}' does not exist.").format(x=role)); return df, "\n".join(out)
+            out.append(f"⛔ Error: Role '{role}' does not exist."); return df, "\n".join(out)
         st.session_state.sujets_definis.add(subject)
         st.session_state.subject_roles.setdefault(subject, set())
         if role: st.session_state.subject_roles[subject].add(role)
@@ -645,71 +760,78 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
                 mask = (df["Source"]==subject)&(df["Permission"]==perm)&(df["Target"]==obj)&(df["Role"]==role)
                 if not mask.any():
                     df = pd.concat([df, pd.DataFrame([{"Source":subject,"Permission":perm,"Target":obj,"Role":role,"Heritage":"Role"}], columns=df.columns)], ignore_index=True)
-        out.append(tr("✅ Sujet '{s}' ajouté{r}.", "✅ Subject '{s}' added{r}.").format(
-            s=subject, r=tr(" avec le rôle '{x}'", " with role '{x}'").format(x=role) if role else ""))
+        out.append(f"✅ Subject '{subject}' added" + (f" with role '{role}'" if role else ""))
         return df, "\n".join(out)
 
     if command == "GrantPermission":
         if len(args)!=3:
-            out.append(tr("❌ Usage: GrantPermission R1 R O1", "❌ Usage: GrantPermission R1 R O1")); return df, "\n".join(out)
+            out.append("❌ Usage: GrantPermission R1 R O1"); return df, "\n".join(out)
         role, perm, obj = args[0].strip(), _norm_perm(args[1]), _norm_entity(args[2])
         if role not in st.session_state.roles_definis:
-            out.append(tr("❌ Rôle '{x}' non défini.", "❌ Role '{x}' is not defined.").format(x=role)); return df, "\n".join(out)
+            out.append(f"❌ Role '{role}' is not defined."); return df, "\n".join(out)
         if obj not in st.session_state.objets_definis:
-            out.append(tr("❌ L'objet '{x}' n'existe pas. Utilisez AddObj d'abord.", "❌ Object '{x}' does not exist. Use AddObj first.").format(x=obj)); return df, "\n".join(out)
+            out.append(f"❌ Object '{obj}' does not exist. Use AddObj first."); return df, "\n".join(out)
         st.session_state.role_permissions.setdefault(role,set()).add((perm,obj))
         for subj, roles in st.session_state.subject_roles.items():
             if role in roles:
                 mask = (df["Source"]==subj)&(df["Permission"]==perm)&(df["Target"]==obj)&(df["Role"]==role)
                 if not mask.any():
                     df = pd.concat([df, pd.DataFrame([{"Source":subj,"Permission":perm,"Target":obj,"Role":role,"Heritage":"Role"}], columns=df.columns)], ignore_index=True)
-        out.append(tr("✅ Permission '{p}' sur '{o}' accordée au rôle '{r}' et propagée.",
-                      "✅ Permission '{p}' on '{o}' granted to role '{r}' and propagated.").format(p=perm, o=obj, r=role))
+        out.append(f"✅ Permission '{perm}' on '{obj}' granted to role '{role}' and propagated.")
         return df, "\n".join(out)
 
     if command == "RevokePermission":
         if len(args)!=3:
-            out.append(tr("❌ Usage: RevokePermission R1 R O1", "❌ Usage: RevokePermission R1 R O1")); return df, "\n".join(out)
+            out.append("❌ Usage: RevokePermission R1 R O1"); return df, "\n".join(out)
         role, perm, obj = args[0].strip(), _norm_perm(args[1]), _norm_entity(args[2])
         if role not in st.session_state.roles_definis:
-            out.append(tr("⛔ Erreur: le rôle '{x}' n'existe pas.", "⛔ Error: Role '{x}' does not exist.").format(x=role)); return df, "\n".join(out)
+            out.append(f"⛔ Error: Role '{role}' does not exist."); return df, "\n".join(out)
         if obj not in st.session_state.objets_definis:
-            out.append(tr("⛔ Erreur: l'objet '{x}' n'existe pas.", "⛔ Error: Object '{x}' does not exist.").format(x=obj)); return df, "\n".join(out)
+            out.append(f"⛔ Error: Object '{obj}' does not exist."); return df, "\n".join(out)
         st.session_state.role_permissions.setdefault(role,set()).discard((perm,obj))
         before = len(df)
         df = df[~((df["Permission"]==perm)&(df["Target"]==obj)&(df["Role"]==role))]
-        out.append(tr("🗑️ Permission '{p}' sur '{o}' retirée du rôle '{r}' ({n} propagation(s) supprimée(s)).",
-                      "🗑️ Permission '{p}' on '{o}' revoked from role '{r}' ({n} propagation(s) removed).").format(
-            p=perm, o=obj, r=role, n=before-len(df)))
+        out.append(f"🗑️ Permission '{perm}' on '{obj}' revoked from role '{role}' ({before-len(df)} propagation(s) removed).")
         return df, "\n".join(out)
 
+    # -------- DAC --------
     if len(parts)>=3 and parts[1]=="AddObj":
         owner, obj = _norm_entity(parts[0]), _norm_entity(parts[2])
         if owner not in st.session_state.sujets_definis:
-            out.append(tr("⛔ Erreur: le sujet '{x}' n'existe pas. Utilisez AddSub d'abord.",
-                          "⛔ Error: Subject '{x}' does not exist. Use AddSub first.").format(x=owner)); return df, "\n".join(out)
+            out.append(f"⛔ Error: Subject '{owner}' does not exist. Use AddSub first."); return df, "\n".join(out)
         if obj in st.session_state.objets_definis:
-            out.append(tr("ℹ️ L'objet '{x}' existe déjà.", "ℹ️ The object '{x}' already exists.").format(x=obj)); return df, "\n".join(out)
+            out.append(f"ℹ️ The object '{obj}' already exists."); return df, "\n".join(out)
         st.session_state.objets_definis.add(obj)
         df = pd.concat([df, pd.DataFrame([{"Source":owner,"Permission":"Owner","Target":obj,"Role":None,"Heritage":None}], columns=df.columns)], ignore_index=True)
-        out.append(tr("✅ Objet '{o}' créé avec le propriétaire '{s}'", "✅ Object '{o}' created with owner '{s}'").format(o=obj, s=owner))
+        out.append(f"✅ Object '{obj}' created with owner '{owner}'")
         return df, "\n".join(out)
 
     if len(parts)>=5 and parts[1]=="Grant":
         owner, _, subject, obj, perm = _norm_entity(parts[0]), parts[1], _norm_entity(parts[2]), _norm_entity(parts[3]), _norm_perm(parts[4])
         if owner not in st.session_state.sujets_definis:
-            out.append(tr("⛔ Erreur: le sujet '{x}' n'existe pas.", "⛔ Error: Subject '{x}' does not exist.").format(x=owner)); return df, "\n".join(out)
+            out.append(f"⛔ Error: Subject '{owner}' does not exist."); return df, "\n".join(out)
         if subject not in st.session_state.sujets_definis:
-            out.append(tr("⛔ Erreur: le sujet cible '{x}' n'existe pas.", "⛔ Error: Target subject '{x}' does not exist.").format(x=subject)); return df, "\n".join(out)
+            out.append(f"⛔ Error: Target subject '{subject}' does not exist."); return df, "\n".join(out)
         if obj not in st.session_state.objets_definis:
-            out.append(tr("⛔ Erreur: l'objet '{x}' n'existe pas.", "⛔ Error: Object '{x}' does not exist.").format(x=obj)); return df, "\n".join(out)
+            out.append(f"⛔ Error: Object '{obj}' does not exist."); return df, "\n".join(out)
         is_owner = ((df["Source"]==owner) & (df["Target"]==obj) & (df["Permission"]=="Owner")).any()
         if not is_owner:
-            out.append(tr("⛔ Erreur: '{o}' n'est pas propriétaire de '{x}'.", "⛔ Error: '{o}' is not the owner of '{x}'.").format(o=owner, x=obj)); return df, "\n".join(out)
+            out.append(f"⛔ Error: '{owner}' is not the owner of '{obj}'."); return df, "\n".join(out)
         df = pd.concat([df, pd.DataFrame([{"Source":subject,"Permission":perm,"Target":obj,"Role":None,"Heritage":None}], columns=df.columns)], ignore_index=True)
-        out.append(tr("✅ Permission '{p}' accordée à '{s}' sur '{o}' par '{w}'.",
-                      "✅ Permission '{p}' granted to '{s}' on '{o}' by '{w}'.").format(p=perm, s=subject, o=obj, w=owner))
+        out.append(f"✅ Permission '{perm}' granted to '{subject}' on '{obj}' by '{owner}'.")
         return df, "\n".join(out)
+
+    # -------- China Wall --------
+    if command == "AddCh" and len(args) == 3:
+        s, perm, o = _norm_entity(args[0]), _norm_perm(args[1]), _norm_entity(args[2])
+        if perm not in {"R","W"}:
+            out.append("❌ Permission must be R or W."); return df, "\n".join(out)
+        temp = pd.concat([df, pd.DataFrame([{"Source":s,"Permission":perm,"Target":o,"Role":None,"Heritage":None}])], ignore_index=True)
+        violated, msg = _would_violate_china_wall(temp)
+        if violated:
+            out.append(f"⛔ Bloqué : {msg}"); return df, "\n".join(out)
+        df = temp
+        out.append(f"✅ Channel added: {s} --{perm}--> {o}"); return df, "\n".join(out)
 
     if command == "Never":
         if "for" in args:
@@ -718,63 +840,59 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
             entites = [e.strip("{} ,") for e in args[idx+1:]]
             for ent in entites:
                 st.session_state.interdictions_entites.setdefault(ent, []).append(etiquettes)
-            out.append(tr("🚧 Combinaison interdite {x} pour: {e}",
-                          "🚧 Forbidden combination {x} for entities: {e}").format(x=etiquettes, e=entites))
+            out.append(f"🚧 Forbidden combination {etiquettes} for entities: {entites}")
             return df, "\n".join(out)
         etiquettes = [e.strip("{} ,") for e in args]
         st.session_state.interdictions_globales.append(etiquettes)
-        out.append(tr("🚧 Combinaison globale interdite: {x}", "🚧 Globally forbidden combination: {x}").format(x=etiquettes))
+        out.append(f"🚧 Globally forbidden combination: {etiquettes}")
         return df, "\n".join(out)
 
-    # -------- AddCh (avec contrôle China-Wall) ----------
-    if command == "AddCh":
-        # Formes: AddCh E1 E2 | AddCh S1 R O1 | AddCh S1 R R1 O1
-        if len(args) == 2:
-            source = _norm_entity(args[0]); permission = "R"; role = None; target = _norm_entity(args[1])
-        elif len(args) == 3:
-            source = _norm_entity(args[0]); permission = _norm_perm(args[1]); role = None; target = _norm_entity(args[2])
-        elif len(args) == 4:
-            source = _norm_entity(args[0]); permission = _norm_perm(args[1]); role = args[2].strip(); target = _norm_entity(args[3])
-        else:
-            out.append(tr("❌ Usage: AddCh E1 E2  |  AddCh S1 R O1  |  AddCh S1 R R1 O1",
-                          "❌ Usage: AddCh E1 E2  |  AddCh S1 R O1  |  AddCh S1 R R1 O1"))
-            return df, "\n".join(out)
-
-        temp = pd.concat([df, pd.DataFrame([{
-            "Source": source, "Permission": permission, "Target": target, "Role": role, "Heritage": None
-        }], columns=df.columns)], ignore_index=True)
-
-        ok, msg = check_china_wall(temp)
-        if not ok:
-            return df, "\n".join(out + [msg])
-
-        df = normalize_df(temp)
-        if len(args) == 2:
-            out.append(tr("✅ Canal ajouté: {a} --R--> {b}", "✅ Channel added: {a} --R--> {b}").format(a=source, b=target))
-        else:
-            out.append(tr("✅ Canal ajouté: {a} --{p}/{r}--> {b}",
-                          "✅ Channel added: {a} --{p}/{r}--> {b}").format(a=source, p=permission, r=role, b=target))
+    if command == "RemoveGlobalBlock" and args:
+        target = [e.strip("{} ,") for e in args]
+        before = len(st.session_state.interdictions_globales)
+        st.session_state.interdictions_globales = [
+            combo for combo in st.session_state.interdictions_globales
+            if combo != target
+        ]
+        out.append(f"🗑️ Global block removed ({before - len(st.session_state.interdictions_globales)}).")
         return df, "\n".join(out)
 
-    # --- AddEnt (entités neutres) ---------------------------------------
-    if command == "AddEnt":
-        if len(args) != 1:
-            out.append(tr("❌ Usage: AddEnt E1", "❌ Usage: AddEnt E1"))
-            return df, "\n".join(out)
-        ent = _norm_entity(args[0])
-        df = pd.concat([df, pd.DataFrame([{
-            "Source": ent, "Permission": None, "Target": None, "Role": None, "Heritage": None
-        }], columns=df.columns)], ignore_index=True)
-        out.append(tr("✅ Entité '{e}' ajoutée ",
-                      "✅ Entity '{e}' added").format(e=ent))
+    if command == "ClearGlobalBlocks":
+        count = len(st.session_state.interdictions_globales)
+        st.session_state.interdictions_globales.clear()
+        out.append(f"🧹 Global blocks cleared ({count}).")
+        return df, "\n".join(out)
+
+    if command == "RemoveEntityBlock" and "for" in args:
+        idx = args.index("for")
+        etiquettes = [e.strip("{} ,") for e in args[:idx]]
+        ent = args[idx+1].strip("{} ,")
+        removed = 0
+        combos = st.session_state.interdictions_entites.get(ent, [])
+        newc = []
+        for c in combos:
+            if c == etiquettes:
+                removed += 1
+            else:
+                newc.append(c)
+        if removed:
+            st.session_state.interdictions_entites[ent] = newc
+        out.append(f"🗑️ Entity block removed for {ent} ({removed}).")
+        return df, "\n".join(out)
+
+    if command == "ClearEntityBlocks" and len(args) == 1:
+        ent = args[0]
+        count = len(st.session_state.interdictions_entites.get(ent, []))
+        st.session_state.interdictions_entites.pop(ent, None)
+        out.append(f"🧹 Blocks cleared for {ent} ({count}).")
         return df, "\n".join(out)
 
     if command == "show":
         process_data_display(df, key_prefix="terminal_show")
-        out.append(tr("🚀 Génération des graphes…", "🚀 Rendering graphs…"))
+        out.append("🚀 Génération des graphes…")
         return df, "\n".join(out)
 
-    out.append(tr("❌ Commande inconnue.", "❌ Unknown command."))
+    out.append("❌ Unknown command.")
     return df, "\n".join(out)
 
 # ======================= UI / CALLBACK =====================
@@ -787,29 +905,14 @@ def _run_command_callback():
     st.rerun()
 
 def main():
-    # --- Sidebar: language switch ---
-    st.sidebar.markdown("## 🌐 Language / Langue")
-    choice = st.sidebar.selectbox("Language / Langue", ["Français", "English"],
-                                  index=0 if st.session_state.lang=="fr" else 1)
-    st.session_state.lang = "fr" if choice == "Français" else "en"
+    st.title("🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires– DAC / MAC/ RBAC /ABAC")
 
-    st.title(tr(
-        "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC",
-        "🔐 Visual interface for secure data-flow control – DAC / MAC / RBAC"
-    ))
-
-    tabs = st.tabs([
-        tr("📂 Fichier Excel", "📂 Excel file"),
-        tr("⌨️ Terminal", "⌨️ Terminal"),
-    ])
+    tabs = st.tabs(["📂 Fichier Excel", "⌨️ Terminal", "📊 Perf"])
 
     # ------- Onglet Excel -------
     with tabs[0]:
-        st.write(tr(
-            "Charge un fichier **RBAC** (Source, Permission, Target, Role) ou **Entités** (Entity1, Entity2).",
-            "Upload a **RBAC** file (Source, Permission, Target, Role) or **Entities** (Entity1, Entity2)."
-        ))
-        up = st.file_uploader(tr("Importer un fichier Excel", "Upload an Excel file"), type=["xlsx"])
+        st.write("Charge un fichier **RBAC** (Source, Permission, Target, Role) ou **Entités** (Entity1, Entity2).")
+        up = st.file_uploader("Importer un fichier Excel", type=["xlsx"])
         if up:
             try:
                 content = up.getvalue()
@@ -821,134 +924,98 @@ def main():
                     df = pd.read_excel(io.BytesIO(content))
                     req = {"Source","Permission","Target"}
                     missing = req - set(df.columns)
-                    if missing:
-                        raise ValueError(tr("Colonnes manquantes: {x}", "Missing columns: {x}").format(x=missing))
+                    if missing: raise ValueError(f"Colonnes manquantes: {missing}")
                     if "Role" not in df.columns: df["Role"] = None
                     if "Heritage" not in df.columns: df["Heritage"] = None
                     df = normalize_df(df)
                 st.session_state.global_data = df
-                st.success(tr("✅ Fichier chargé.", "✅ File loaded."))
-                with st.expander(tr("Voir les données chargées", "View loaded data")):
+                st.success("✅ Fichier chargé.")
+                with st.expander("Voir les données chargées"):
                     st.dataframe(df, use_container_width=True)
             except Exception as e:
-                st.error(tr("Erreur de lecture du fichier: {e}", "File read error: {e}").format(e=e))
+                st.error(f"Erreur de lecture du fichier: {e}")
 
         st.markdown("---")
-        st.subheader(tr("Visualisations", "Visualizations"))
+        st.subheader("Visualisations")
         process_data_display(st.session_state.global_data, key_prefix="excel")
+
+        with st.expander("📂 Aide Excel (comment structurer vos fichiers)", expanded=False):
+            st.markdown(
+                "### Quel type de fichier puis-je importer ?\n"
+                "Deux formats sont supportés :\n"
+                "1) **RBAC** avec les colonnes **`Source`**, **`Permission`**, **`Target`**, **`Role`** *(et optionnel `Heritage`)*.\n"
+                "2) **Entités** avec les colonnes **`Entity1`**, **`Entity2`** (canaux entre entités génériques).\n\n"
+                "#### Exemple RBAC\n"
+                "```\n"
+                "Source,Permission,Target,Role\n"
+                "S1,R,O1,R1\n"
+                "S2,W,O2,R2\n"
+                "```\n"
+                "➡️ Les rôles sont propagés automatiquement (si un sujet a `R1`, il hérite des permissions de `R1`).\n\n"
+                "#### Exemple Entités\n"
+                "```\n"
+                "Entity1,Entity2\n"
+                "E1,E2\n"
+                "E2,E3\n"
+                "```\n"
+                "➡️ Ces paires créent des **canaux** (E1 → E2, E2 → E3) et permettent d’afficher **le graphe d’entités** même sans sujets/objets.\n\n"
+                "#### Normalisation automatique\n"
+                "- Les identifiants sont **nettoyés** et **normalisés** (ex: `e01` → `E1`, `s0003` → `S3`).\n"
+                "- Les permissions sont mises en majuscules (`r` → `R`, `w` → `W`).\n\n"
+                "#### Conseils\n"
+                "- Vérifiez l’orthographe exacte des noms de colonnes.\n"
+                "- Évitez les cellules vides. Une ligne incomplète sera ignorée.\n"
+                "- Pour le **graphe combiné**, un minimum de relations (R/W ou paires Entity1/Entity2) est requis.\n"
+            )
 
     # ------- Onglet Terminal -------
     with tabs[1]:
-    # ======================= AIDE COMMANDES =======================
         st.markdown(
-            tr(
-            # -------- Version française --------
-            "### 📌 Mode d'emploi des commandes (Terminal)\n"
-            "Pour exécuter les commandes, suivez les étapes propres à chaque modèle. "
-            "Vous entrez la commande puis appuyez sur **Entrée**.  \n\n"
-
-            "**VERSION ENTITÉ**  \n"
-            "Étape1: création des entités → `AddEnt E1` · `AddEnt E2`  \n"
-            "Étape2: création des canaux → `AddCh E1 E2`  \n\n"
-
-            "**MODÈLE DAC**  \n"
-            "Étape1: création des sujets → `AddSub S2` · `AddSub S3`  \n"
-            "Étape2: création des objets par un propriétaire → `S2 AddObj O2`  \n"
-            "Étape3: attribution de permission du propriétaire à un sujet → `S2 Grant S3 O2 R`  \n\n"
-
-            "**MODÈLE MAC**  \n"
-            "Étape1: création des sujets → `AddSub S1`  \n"
-            "Étape2: création des objets → `AddObj O1`  \n"
-            "Étape3: création des canaux → `AddCh S1 R O1`  \n\n"
-
-            "**CHINA-WALL**  \n"
-            "Étape1: création des sujets → `AddSub S1`  \n"
-            "Étape2: création des objets → `AddObj O1`  \n"
-            "Étape3: condition de restriction → `Never {S1, O1}`  \n"
-            "Étape4: création des canaux → `AddCh S1 R O1`  \n\n"
-
-            "**MODÈLE RBAC**  \n"
-            "Étape1: création des objets → `AddObj O1`  \n"
-            "Étape2: création des rôles → `AddRole R1`  \n"
-            "Étape3: attribution de permission au rôle sur l’objet → `GrantPermission R1 R O1`  \n"
-            "Étape4: création d’un sujet avec rôle attribué → `AddSub S1 R1`  \n\n"
-
-            "---\n"
-            "### 📂 Mode d'emploi pour l’option Excel\n"
-            "Vous pouvez charger un fichier **Excel** contenant :\n"
-            "- **RBAC** → colonnes `Source`, `Permission`, `Target`, `Role` (et facultatif `Heritage`).\n"
-            "   Exemple :\n"
-            "   | Source | Permission | Target | Role |\n"
-            "   |--------|------------|--------|------|\n"
-            "   | S1     | R          | O1     | R1   |\n"
-            "   | S2     | W          | O2     | R2   |\n\n"
-            "- **Entités** → colonnes `Entity1`, `Entity2`.\n"
-            "   Exemple :\n"
-            "   | Entity1 | Entity2 |\n"
-            "   |---------|---------|\n"
-            "   | E1      | E2      |\n"
-            "   | E2      | E3      |\n\n"
-            "⚠️ Les entités sont normalisées automatiquement (ex: `e01` → `E1`).\n"
-        ,
-            # -------- English version --------
-            "### 📌 Command usage guide (Terminal)\n"
-            "To execute commands, follow the steps specific to each model. "
-            "Enter the command then press **Enter**.  \n\n"
-
-            "**ENTITY VERSION**  \n"
-            "Step1: create entities → `AddEnt E1` · `AddEnt E2`  \n"
-            "Step2: create channels → `AddCh E1 E2`  \n\n"
-
-            "**DAC MODEL**  \n"
-            "Step1: create subjects → `AddSub S2` · `AddSub S3`  \n"
-            "Step2: create objects by an owner → `S2 AddObj O2`  \n"
-            "Step3: assign permission from owner to a subject → `S2 Grant S3 O2 R`  \n\n"
-
-            "**MAC MODEL**  \n"
-            "Step1: create subjects → `AddSub S1`  \n"
-            "Step2: create objects → `AddObj O1`  \n"
-            "Step3: create channels → `AddCh S1 R O1`  \n\n"
-
-            "**CHINA-WALL**  \n"
-            "Step1: create subjects → `AddSub S1`  \n"
-            "Step2: create objects → `AddObj O1`  \n"
-            "Step3: restriction condition → `Never {S1, O1}`  \n"
-            "Step4: create channels → `AddCh S1 R O1`  \n\n"
-
-            "**RBAC MODEL**  \n"
-            "Step1: create objects → `AddObj O1`  \n"
-            "Step2: create roles → `AddRole R1`  \n"
-            "Step3: assign permission to role on object → `GrantPermission R1 R O1`  \n"
-            "Step4: create subject with assigned role → `AddSub S1 R1`  \n\n"
-
-            "---\n"
-            "### 📂 Excel option usage\n"
-            "You can load an **Excel** file containing:\n"
-            "- **RBAC** → columns `Source`, `Permission`, `Target`, `Role` (and optional `Heritage`).\n"
-            "   Example:\n"
-            "   | Source | Permission | Target | Role |\n"
-            "   |--------|------------|--------|------|\n"
-            "   | S1     | R          | O1     | R1   |\n"
-            "   | S2     | W          | O2     | R2   |\n\n"
-            "- **Entities** → columns `Entity1`, `Entity2`.\n"
-            "   Example:\n"
-            "   | Entity1 | Entity2 |\n"
-            "   |---------|---------|\n"
-            "   | E1      | E2      |\n"
-            "   | E2      | E3      |\n\n"
-            "⚠️ Entities are automatically normalized (e.g. `e01` → `E1`).\n"
+            "Pour exécuter les commandes, vous devez suivre les étapes propres à chaque modèle. "
+            "Vous entrez la commande puis appuyez sur **Entrée**  \n"
+            "VERSION ENTITE  \n"
+            "Etape1: création des entités → `AddEnt E1` · `AddEnt E2` \n"
+            "Etape2: création des canaux → `AddCh E1 E2`  \n"
+            "— Modifications : `RenameEnt E1 E1X` · `DelEnt E1` · `DelCh E1 E2`  \n"
+            "MODELE DAC \n"
+            "Etape1: Création des sujets → `AddSub S2` · `AddSub S3` \n"
+            "Etape2: Création des objets de propriétaire → `S2 AddObj O2`  \n"
+            "Etape3: Attribution des permissions de propriétaire → `S2 Grant S3 O2 R`  \n"
+            "— Modifications : `DelSub S2` · `RenameSub S2 S2X` · `DelObj O2` · `RenameObj O2 O2X`  \n"
+            "MODELE MAC \n"
+            "Etape1: Création des sujets → `AddSub S1` \n"
+            "Etape2: Création des objets → `AddObj O1` \n"
+            "Etape3: Création des canaux → `AddCh S1 R O1` \n"
+            "MODELE CHINA-WALL \n"
+            "Etape1: Création des sujets → `AddSub S1`  \n"
+            "Etape2: Création des objets → `AddObj O1` \n"
+            "Etape3: Règle de restriction → `Never {S1, O1}` \n"
+            "Etape4: Test canal → `AddCh S1 R O1`  \n"
+            "— Modifs règles : `RemoveGlobalBlock S1 O1` · `ClearGlobalBlocks` · "
+            "`RemoveEntityBlock A B for E1` · `ClearEntityBlocks E1`  \n"
+            "MODELE RBAC \n"
+            "Etape1: Création des objets → `AddObj O1` \n"
+            "Etape2: Création des rôles → `AddRole R1`  \n"
+            "Etape3: Permission du rôle → `GrantPermission R1 R O1` \n"
+            "Etape4: Sujet avec rôle → `AddSub S1 R1`  \n"
+            "— Ajouter rôle à sujet existant : `AssignRole S1 R2` (multi: `AssignRole S1 R2 R3`) "
+            " | Alias : `AddRoleToSub S1 R2`, `AddSubRole S1 R2`  \n"
+            "— Retirer rôle(s) : `UnassignRole S1 R2` (multi: `UnassignRole S1 R2 R3`)  \n"
+            "— Modifications : `DelRole R1` · `RenameRole R1 R1X` · `RevokePermission R1 R O1`  \n"
         )
-    )
+        st.text_input("C:\\>", key="cmd_input", placeholder="Ex: AssignRole S1 R2 R3", on_change=_run_command_callback)
+        st.text_area("Historique", "\n\n".join(st.session_state.history), height=340)
 
-    st.text_input("C:\\>", key="cmd_input",
-                  placeholder=tr("Ex: AddSub S1 R1", "Ex: AddSub S1 R1"),
-                  on_change=_run_command_callback)
-    st.text_area(tr("Historique", "History"),
-                 "\n\n".join(st.session_state.history), height=340)
+        st.markdown("---")
+        st.subheader("Graphes (issus des commandes)")
+        process_data_display(st.session_state.global_data, key_prefix="terminal")
 
-    st.markdown("---")
-    st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
-    process_data_display(st.session_state.global_data, key_prefix="terminal")
+    # ------- Onglet Perf -------
+    with tabs[2]:
+        st.write("Mesure des temps (SCC vs propagation) sur un graphe aléatoire clairsemé.")
+        n = st.slider("Nombre d'entités", 20, 2000, 200, step=20)
+        if st.button("Lancer EvalPerf"):
+            evaluer_performance_interface(n)
 
 if __name__ == "__main__":
     main()
