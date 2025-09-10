@@ -74,6 +74,12 @@ st.sidebar.radio(
     key="lang"
 )
 
+st.title(tr(
+    "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC",
+    "🔐 Graphical interface for secure data flow control representation – DAC / MAC / RBAC / ABAC"
+))
+
+
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
     if "global_data" not in st.session_state:
@@ -1081,10 +1087,6 @@ def excel_help_text() -> str:
         )
 
 def main():
-    st.title("🔐 " + tr(
-        "Interface graphique pour la représentation de contrôle de flux de données sécuritaires– DAC / MAC/ RBAC /ABAC",
-        "Graphical interface for secure data-flow control representation – DAC / MAC / RBAC / ABAC"
-    ))
 
     tabs = st.tabs([tr("📂 Fichier Excel", "📂 Excel File"),
                     tr("⌨️ Terminal", "⌨️ Terminal"),
