@@ -1080,7 +1080,7 @@ def excel_help_text() -> str:
 def main():
 
     tabs = st.tabs([tr("📂 Fichier Excel", "📂 Excel File"),
-                    tr("⌨️ Terminal", "⌨️ Terminal")
+                    tr("⌨️ Terminal", "⌨️ Terminal")])
 
     # ------- Onglet Excel -------
     with tabs[0]:
