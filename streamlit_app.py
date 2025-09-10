@@ -10,11 +10,6 @@
 #  - Commandes AssignRole / UnassignRole / édition entités/objets/rôles
 # -----------------------------------------------------------
 
-# Forcer l'interface en plein écran (pas centrée, largeur max)
-# Forcer l'interface en plein écran (pas centrée, largeur max)
-
-
-
 import io
 import re
 import time
@@ -32,10 +27,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Pleine largeur + titres alignés à gauche (ne pas indenter) ---
+# --- Pleine largeur + titres alignés à gauche (pas centrés) ---
 FULL_WIDTH_CSS = """
 <style>
-/* Force la zone principale à utiliser toute la largeur */
 section.main > div.block-container {
     max-width: 100% !important;
     padding-left: 2rem;
@@ -43,15 +37,10 @@ section.main > div.block-container {
     padding-top: 1rem;
     padding-bottom: 1rem;
 }
-
-/* En-têtes à gauche (pas centrés) */
-h1, h2, h3, h4, h5, h6 {
-    text-align: left !important;
-}
+h1, h2, h3, h4, h5, h6 { text-align: left !important; }
 </style>
 """
 st.markdown(FULL_WIDTH_CSS, unsafe_allow_html=True)
-
 
 # ===================== i18n (FR/EN) ========================
 # Langue en session
@@ -66,19 +55,21 @@ def tr(fr: str, en: str, **kw) -> str:
     except Exception:
         return s
 
-# Exemple d'utilisation :
-st.sidebar.radio(
-    "🌐 Choisir la langue / Choose language",
+# Sélecteur global de langue (valeurs stables "fr"/"en")
+_lang_labels = {"fr": "Français", "en": "English"}
+lang_selected = st.sidebar.radio(
+    tr("🌐 Choisir la langue", "🌐 Choose language"),
     options=["fr", "en"],
     index=0 if st.session_state.lang == "fr" else 1,
-    key="lang"
+    format_func=lambda code: _lang_labels[code],
 )
+st.session_state.lang = lang_selected
 
+# Titre
 st.title(tr(
     "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC",
     "🔐 Graphical interface for secure data flow control representation – DAC / MAC / RBAC / ABAC"
 ))
-
 
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
@@ -353,7 +344,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
     cur_y_right = 0
     node_indices = {}
     G1 = nx.DiGraph()
-    role_to_subject = {s: role_data.get(s, "No role") for s in allowed_subjects}
+    role_to_subject = {s: role_data.get(s, tr("Aucun rôle", "No role")) for s in allowed_subjects}
 
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
 
@@ -945,9 +936,9 @@ def _run_command_callback():
     st.session_state.cmd_input = ""
     st.rerun()
 
-# ======== Texte d'aide TERMINAL (FR/EN) formaté ligne par ligne ========
+# ======== Texte d'aide TERMINAL (FR/EN) ========
 def terminal_help_text() -> str:
-    if st.session_state.lang == "FR":
+    if st.session_state.lang == "fr":
         return (
             "### Aide des commandes (FR)\n"
             "**Utilisation :** entrez la commande puis appuyez sur **Entrée**.\n\n"
@@ -1028,8 +1019,9 @@ def terminal_help_text() -> str:
             "Edits: `DelRole R1` · `RenameRole R1 R1X` · `RevokePermission R1 R O1`\n"
         )
 
+# ======== Aide Excel (FR/EN) ========
 def excel_help_text() -> str:
-    if st.session_state.lang == "FR":
+    if st.session_state.lang == "fr":
         return (
             "### 📂 Aide Excel (comment structurer vos fichiers)\n"
             "Deux formats sont supportés :\n"
@@ -1086,6 +1078,7 @@ def excel_help_text() -> str:
             "- The **combined graph** needs at least a few relations (R/W or Entity1/Entity2 pairs).\n"
         )
 
+# ============================== MAIN ==============================
 def main():
 
     tabs = st.tabs([tr("📂 Fichier Excel", "📂 Excel File"),
