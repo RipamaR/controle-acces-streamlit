@@ -1034,7 +1034,6 @@ def excel_help_text() -> str:
             "   |--------|------------|--------|------|\n"
             "   | S1     | R          | O1     | R1   |\n"
             "   | S2     | W          | O2     | R2   |\n\n"
-            "- **Entités** → colonnes `Entity1`, `Entity2`.\n"
             
             "```\n"
             "➡️ Les rôles sont propagés automatiquement (si un sujet a `R1`, il hérite des permissions de `R1`).\n\n"
