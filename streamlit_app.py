@@ -42,11 +42,6 @@ st.sidebar.radio(
     key="lang"
 )
 
-st.title(tr(
-    "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC / RBAC / ABAC",
-    "🔐 Graphical interface for secure data flow control representation – DAC / MAC / RBAC / ABAC"
-))
-
 st.markdown(tr(
     "Bienvenue dans l'interface ! Vous pouvez exécuter des commandes en français.",
     "Welcome to the interface! You can execute commands in English."
