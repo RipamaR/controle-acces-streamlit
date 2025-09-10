@@ -42,12 +42,6 @@ st.sidebar.radio(
     key="lang"
 )
 
-st.markdown(tr(
-    "Bienvenue dans l'interface ! Vous pouvez exécuter des commandes en français.",
-    "Welcome to the interface! You can execute commands in English."
-))
-
-
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
     if "global_data" not in st.session_state:
