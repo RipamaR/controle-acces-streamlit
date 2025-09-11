@@ -71,6 +71,13 @@ st.title(tr(
     "🔐 Graphical interface for secure data flow control representation – DAC / MAC /China-Wall / RBAC "
 ))
 
+# --- Option plein écran des graphes ---
+fs_label = tr("🖼️ Plein écran des graphes", "🖼️ Fullscreen graphs")
+if "fullscreen_graphs" not in st.session_state:
+    st.session_state.fullscreen_graphs = False
+st.session_state.fullscreen_graphs = st.sidebar.checkbox(fs_label, value=st.session_state.fullscreen_graphs)
+
+
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
     if "global_data" not in st.session_state:
@@ -1075,6 +1082,31 @@ def excel_help_text() -> str:
             "- Avoid empty cells. Incomplete rows are ignored.\n"
             "- The **combined graph** needs at least a few relations (R/W or Entity1/Entity2 pairs).\n"
         )
+# --- Mode plein écran pour les graphes (force les iframes pyvis à remplir la page) ---
+if st.session_state.fullscreen_graphs:
+    st.markdown("""
+    <style>
+    /* Réduire au minimum les paddings pour “page pleine” */
+    section.main > div.block-container {
+        padding-left: 0.5rem !important;
+        padding-right: 0.5rem !important;
+        padding-top: 0.25rem !important;
+        padding-bottom: 0.25rem !important;
+        max-width: 100% !important;
+    }
+    /* Forcer les iframes des composants (pyvis via st_html) à occuper la hauteur de la fenêtre */
+    iframe[data-testid="stIFrame"] {
+        height: 92vh !important;  /* ~ pleine hauteur */
+        width: 100% !important;
+    }
+    /* Optionnel : enlever l’ombre/marges autour des composants pour un vrai full-bleed */
+    div[data-testid="stMarkdownContainer"] > div, 
+    div[data-testid="stVerticalBlock"] > div {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
 # ============================== MAIN ==============================
 def main():
