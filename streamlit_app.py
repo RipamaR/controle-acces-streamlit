@@ -965,7 +965,7 @@ def terminal_help_text() -> str:
             "### Aide des commandes (FR)\n"
             "**Utilisation :** entrez la commande puis appuyez sur **Entrée**.\n\n"
 
-            "**VERSION ENTITÉ**\n"
+            "**VERSION ENTITÉ** .\n"
             "Étape 1 : Création des entités → `AddEnt E1`  \n"
             "Étape 2 : Création des entités → `AddEnt E2`  \n"
             "Étape 3 : Création des canaux → `AddCh E1 E2`  \n"
