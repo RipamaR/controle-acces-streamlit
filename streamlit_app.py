@@ -272,10 +272,12 @@ var options = {
 }
 """
 
-def  _pyvis_show(net, height="height", width="100%"):
+def _pyvis_show(net: Network, height=1000, width=1600):
     net.set_options(PYVIS_OPTIONS)
     html = net.generate_html()
+    # En plein écran, le CSS ci-dessus écrase la hauteur de l’iframe
     st_html(html, height=height, width=width, scrolling=True)
+
 
 # =============== GRAPHE PRINCIPAL ===========================
 def draw_main_graph(df: pd.DataFrame):
