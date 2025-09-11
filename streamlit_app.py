@@ -77,6 +77,12 @@ if "fullscreen_graphs" not in st.session_state:
     st.session_state.fullscreen_graphs = False
 st.session_state.fullscreen_graphs = st.sidebar.checkbox(fs_label, value=st.session_state.fullscreen_graphs)
 
+st.sidebar.number_input("Hauteur graphe combiné (px)", min_value=900, max_value=6000, step=100,
+                        value=st.session_state.get("combined_graph_height_px", 1800),
+                        key="combined_graph_height_px")
+st.sidebar.number_input("Largeur graphe combiné (px)", min_value=1000, max_value=6000, step=100,
+                        value=st.session_state.get("combined_graph_width_px", 1800),
+                        key="combined_graph_width_px")
 
 # ===================== ÉTAT GLOBAL =========================
 def init_state():
@@ -272,19 +278,24 @@ var options = {
 }
 """
 
-def _pyvis_show(net: Network, height=900, width=1600, fullpage: bool = False):
+def _pyvis_show(net: Network, height: int = 900, width: int = 1600, fullpage: bool = False):
     """
-    Rend un graphe PyVis. Si fullpage=True, on force une iframe quasi pleine-hauteur.
-    Si la case 'fullscreen_graphs' (sidebar) est activée, on force aussi la vue plein écran.
+    Rend le graphe PyVis.
+    - height / width DOIVENT être des int (px).
+    - fullpage=True -> on utilise une grande hauteur (réglable via la sidebar).
     """
     net.set_options(PYVIS_OPTIONS)
     html = net.generate_html()
 
-    # Mode plein écran (spécifique au graphe OU global via la case sidebar)
+    # Hauteurs "plein écran" réglables depuis la sidebar (avec des valeurs par défaut)
+    full_h = int(st.session_state.get("combined_graph_height_px", 1800))
+    full_w = int(st.session_state.get("combined_graph_width_px", 1800))
+
     if fullpage or st.session_state.get("fullscreen_graphs", False):
-        st_html(html, height="92vh", width="100%", scrolling=True)
+        st_html(html, height=full_h, width=full_w, scrolling=True)
     else:
-        st_html(html, height=height, width=width, scrolling=True)
+        st_html(html, height=int(height), width=int(width), scrolling=True)
+
 
 
 
@@ -435,7 +446,7 @@ def draw_combined_graph(components_1, adj_1, labels_1,
             net.add_edge(base_idx + si, base_idx + di, arrows="to")
 
        
-            _pyvis_show(net, height="1000px", width="100%")
+            _pyvis_show(net, fullpage=True)
     
 
 # =============== PROPAGATION RBAC (fichiers) =================
