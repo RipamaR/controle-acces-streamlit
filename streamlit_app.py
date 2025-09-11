@@ -272,11 +272,20 @@ var options = {
 }
 """
 
-def _pyvis_show(net: Network, height=1000, width=1600):
+def _pyvis_show(net: Network, height=900, width=1600, fullpage: bool = False):
+    """
+    Rend un graphe PyVis. Si fullpage=True, on force une iframe quasi pleine-hauteur.
+    Si la case 'fullscreen_graphs' (sidebar) est activée, on force aussi la vue plein écran.
+    """
     net.set_options(PYVIS_OPTIONS)
     html = net.generate_html()
-    # En plein écran, le CSS ci-dessus écrase la hauteur de l’iframe
-    st_html(html, height=height, width=width, scrolling=True)
+
+    # Mode plein écran (spécifique au graphe OU global via la case sidebar)
+    if fullpage or st.session_state.get("fullscreen_graphs", False):
+        st_html(html, height="92vh", width="100%", scrolling=True)
+    else:
+        st_html(html, height=height, width=width, scrolling=True)
+
 
 
 # =============== GRAPHE PRINCIPAL ===========================
@@ -425,7 +434,11 @@ def draw_combined_graph(components_1, adj_1, labels_1,
         if si is not None and di is not None:
             net.add_edge(base_idx + si, base_idx + di, arrows="to")
 
-    _pyvis_show(net, height="1000px", width="100%")
+       
+    _pyvis_show(net, fullpage=True)
+
+    #_pyvis_show(net, height="1000px", width="100%")
+    
 
 # =============== PROPAGATION RBAC (fichiers) =================
 def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
