@@ -511,17 +511,25 @@ def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
         df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     return normalize_df(df)
 
-def collect_all_nodes(df: pd.DataFrame) -> set[str]:
-    """Récupère tous les identifiants connus, même sans arêtes."""
+# =============== COLLECTE DES NOEUDS (même isolés) =========
+def collect_all_nodes_from_df(df: pd.DataFrame) -> set:
+    """
+    Retourne tous les identifiants présents dans les colonnes Source/Target,
+    même s'il n'y a aucune arête R/W (utile pour afficher les nœuds isolés).
+    """
     nodes = set()
-    if "Source" in df.columns:
-        nodes |= {x for x in df["Source"].dropna().astype(str) if x and x.strip().lower() not in _NAN_SET}
-    if "Target" in df.columns:
-        nodes |= {x for x in df["Target"].dropna().astype(str) if x and x.strip().lower() not in _NAN_SET}
-    # Aussi ce que l’utilisateur a créé via commandes
-    nodes |= set(st.session_state.sujets_definis)
-    nodes |= set(st.session_state.objets_definis)
+    if df is None or df.empty:
+        return nodes
+    for col in ("Source", "Target"):
+        if col in df.columns:
+            # on garde seulement des valeurs non vides
+            vals = df[col].dropna().astype(str)
+            for v in vals:
+                v = v.strip()
+                if v and v.lower() not in {"nan", "none", "null"}:
+                    nodes.add(v)
     return nodes
+
 
 
 # =============== CHARGEMENT ENTITÉS (E1,E2) =================
