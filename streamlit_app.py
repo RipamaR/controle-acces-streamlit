@@ -1319,9 +1319,6 @@ def main():
         with st.expander(tr("Aide Excel", "Excel help"), expanded=False):
             st.markdown(excel_help_text())
 
-        with st.expander(tr("Aide des commandes", "Commands help"), expanded=False):
-             st.markdown(terminal_help_text())
-
 
 
         # --- Boutons de téléchargement d'exemples ---
@@ -1363,14 +1360,30 @@ def main():
         process_data_display(st.session_state.global_data, key_prefix="excel")
 
     # ------- Onglet Terminal -------
-    with tabs[1]:
+with tabs[1]:
+    # Bloc repliable : Aide des commandes (FR/EN)
+    with st.expander(tr("Aide des commandes", "Commands help"), expanded=False):
         st.markdown(terminal_help_text())
-        st.text_input("C:\\>", key="cmd_input", placeholder=tr("Ex: AssignRole S1 R2 R3", "Ex: AssignRole S1 R2 R3"), on_change=_run_command_callback)
-        st.text_area(tr("Historique", "History"), "\n\n".join(st.session_state.history), height=340)
 
-        st.markdown("---")
-        st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
-        process_data_display(st.session_state.global_data, key_prefix="terminal")
+    # Champ de saisie de commandes + historique
+    st.text_input(
+        "C:\\>",
+        key="cmd_input",
+        placeholder=tr("Ex: AssignRole S1 R2 R3", "Ex: AssignRole S1 R2 R3"),
+        on_change=_run_command_callback,
+    )
+    st.text_area(
+        tr("Historique", "History"),
+        "\n\n".join(st.session_state.history),
+        height=340,
+        key="history_box_terminal",
+    )
+
+    st.markdown("---")
+    st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
+
+    # Important : key_prefix unique pour éviter les collisions de clés de widgets
+    process_data_display(st.session_state.global_data, key_prefix="terminal")
 
 
 if __name__ == "__main__":
