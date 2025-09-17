@@ -1168,6 +1168,58 @@ if st.session_state.fullscreen_graphs:
     </style>
     """, unsafe_allow_html=True)
 
+# --------- Exemples Excel téléchargeables ---------
+from io import BytesIO
+
+def _bytes_from_df_as_xlsx(df: pd.DataFrame, filename: str) -> tuple[bytes, str]:
+    """Sérialise un DataFrame en .xlsx en mémoire et renvoie (bytes, filename)."""
+    bio = BytesIO()
+    # openpyxl est généralement dispo dans Streamlit Cloud; sinon, pandas choisira un moteur compatible
+    df.to_excel(bio, index=False)
+    bio.seek(0)
+    return bio.read(), filename
+
+def get_example_excel_bytes() -> dict:
+    """
+    Tente d'ouvrir tes fichiers déjà fournis dans /mnt/data/. 
+    Sinon, crée des exemples de repli.
+    Retourne un dict:
+      {
+        "rbac": (bytes, "SujetObjetRoleHeritage.xlsx"),
+        "entities": (bytes, "Entity.xlsx")
+      }
+    """
+    out: dict[str, tuple[bytes, str]] = {}
+
+    # --- RBAC ---
+    try:
+        with open("/mnt/data/SujetObjetRoleHeritage.xlsx", "rb") as f:
+            out["rbac"] = (f.read(), "SujetObjetRoleHeritage.xlsx")
+    except Exception:
+        # Exemple de repli
+        df_rbac = pd.DataFrame(
+            {
+                "Source": ["S1", "S2"],
+                "Permission": ["R", "W"],
+                "Target": ["O1", "O2"],
+                "Role": ["R1", "R2"],
+                "Heritage": [None, None],
+            }
+        )
+        out["rbac"] = _bytes_from_df_as_xlsx(df_rbac, "SujetObjetRoleHeritage.xlsx")
+
+    # --- Entities ---
+    try:
+        with open("/mnt/data/Entity.xlsx", "rb") as f:
+            out["entities"] = (f.read(), "Entity.xlsx")
+    except Exception:
+        # Exemple de repli
+        df_ent = pd.DataFrame({"Entity1": ["E1", "E2"], "Entity2": ["E2", "E3"]})
+        out["entities"] = _bytes_from_df_as_xlsx(df_ent, "Entity.xlsx")
+
+    return out
+
+
 # ============================== MAIN ==============================
 def main():
 
@@ -1205,6 +1257,27 @@ def main():
 
         with st.expander(tr("Aide Excel", "Excel help"), expanded=False):
             st.markdown(excel_help_text())
+
+        with st.expander(tr("Téléchargements d'exemples", "Download examples"), expanded=True):
+            samples = get_example_excel_bytes()
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    label=tr("⬇️ Télécharger l'exemple RBAC", "⬇️ Download RBAC sample"),
+                    data=samples["rbac"][0],
+                    file_name=samples["rbac"][1],
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+            with col2:
+                st.download_button(
+                    label=tr("⬇️ Télécharger l'exemple Entités", "⬇️ Download Entities sample"),
+                    data=samples["entities"][0],
+                    file_name=samples["entities"][1],
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                )
+
 
         st.markdown("---")
         st.subheader(tr("Visualisations", "Visualizations"))
