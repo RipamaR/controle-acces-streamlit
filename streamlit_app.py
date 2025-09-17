@@ -1361,7 +1361,7 @@ def main():
 
     # ------- Onglet Terminal -------
  with tabs[1]:
-        with st.expander(tr("Aide des commandes", "Commands help"), expanded=False):
+     with st.expander(tr("Aide des commandes", "Commands help"), expanded=False):
             st.markdown(terminal_help_text())
 
         st.text_input("C:\\>", key="cmd_input", placeholder=tr("Ex: AssignRole S1 R2 R3", "Ex: AssignRole S1 R2 R3"), on_change=_run_command_callback)
