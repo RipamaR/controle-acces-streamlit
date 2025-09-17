@@ -301,41 +301,58 @@ def _pyvis_show(net: Network, height: int = 900, width: int = 1600, fullpage: bo
 
 # =============== GRAPHE PRINCIPAL ===========================
 def draw_main_graph(df: pd.DataFrame):
-    if df.empty:
+    if df is None or df.empty:
         st.info(tr("Aucune donnée pour générer le graphe.", "No data to draw the graph."))
         return
 
+    # On ne bloque plus si R/W est vide : on veut afficher les nœuds isolés.
     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
+    adj = apply_permissions(df_eff) if not df_eff.empty else {}
 
-    # 👉 Appliquer les permissions sur les relations R/W
-    adj = apply_permissions(df_eff)
+    # ➜ Tous les nœuds présents dans le DF (mêmes isolés)
+    all_nodes = collect_all_nodes_from_df(df)
+    if not all_nodes:
+        st.info(tr("Aucun nœud détecté.", "No node detected."))
+        return
 
-    # 👉 Récupérer aussi tous les nœuds isolés
-    all_nodes = collect_all_nodes(df)   # <<< nouvelle fonction qu’on a ajoutée
-    for n in all_nodes:
-        adj.setdefault(n, [])           # garantir que chaque nœud existe même sans arêtes
-
-    # 👉 Construire le graphe avec TOUS les nœuds
+    # Construire un graphe pour calculer des SCC et positions
     G_adj = nx.DiGraph()
     for u, vs in adj.items():
-        if not vs:
-            G_adj.add_node(u)           # nœud isolé
         for v in vs:
             G_adj.add_edge(u, v)
+    # Ajouter les nœuds isolés aussi
+    for n in all_nodes:
+        if n not in G_adj:
+            G_adj.add_node(n)
 
     scc = list(nx.strongly_connected_components(G_adj))
     scc_sorted = sorted(scc, key=len)
 
-    # (reste du code pour placer et dessiner les nœuds)
+    # positions grille simples
+    x_step, y_step = 400, 300
+    x_positions = [-2*x_step, -x_step, 0, x_step, 2*x_step]
+    node_pos = {}
+    current_y = 0
+    for comp in scc_sorted:
+        xi = 0
+        for n in comp:
+            node_pos[n] = (x_positions[xi % len(x_positions)], -current_y)
+            xi += 1
+        current_y += y_step
+
     net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
-    for n in sorted(all_nodes):         # ici tu parcours bien TOUS les nœuds
+
+    for n in sorted(all_nodes):
         shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
-        net.add_node(n, label=n, shape=shape, color="lightblue")
+        x, y = node_pos.get(n, (0, 0))
+        net.add_node(n, label=n, shape=shape, color="lightblue", x=x, y=y)
+
     for src, dests in adj.items():
         for d in dests:
             net.add_edge(src, d, arrows="to")
 
     _pyvis_show(net)
+
 
 
 # =============== GRAPHE D’UN COMPOSANT ======================
@@ -599,18 +616,28 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
         st.info(tr("Aucune donnée à afficher.", "No data to display."))
         return
 
+    # Propagation / normalisation
     df_expanded = propagate_rbac_from_excel(df)
 
-    # On calcule l’adjacence à partir des R/W s’il y en a…
+    # Relations R/W si présentes (peuvent être vides)
     df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
     adj = apply_permissions(df_effective) if not df_effective.empty else {}
 
-    # …mais on prend les nœuds depuis TOUT le DF pour inclure les nœuds isolés
+    # ➜ Inclure TOUS les nœuds, même isolés (pas de early return)
     active_nodes = collect_all_nodes_from_df(df_expanded)
+    if not active_nodes:
+        st.info(tr("Aucune entité/sujet/objet détecté.", "No entity/subject/object detected."))
+        return
 
     V = sorted(active_nodes)
-    scc, cmap = tarjan(V, adj)
-    labels = propagate_labels(scc, adj, cmap)
+
+    # Tarjan sur l’ensemble des nœuds (même si adj est vide)
+    # On garantit que chaque nœud existe dans adj pour éviter les KeyError.
+    adj_for_tarjan = {v: adj.get(v, []) for v in V}
+    scc, cmap = tarjan(V, adj_for_tarjan)
+
+    # Propagation des étiquettes (ok même si adj est vide)
+    labels = propagate_labels(scc, adj_for_tarjan, cmap)
     simplified = simplify_relations(labels)
 
     st.subheader(tr("Table des entités et étiquettes", "Entities & labels table"))
@@ -622,7 +649,7 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     st.markdown("---")
     st.subheader(tr("Graphe combiné (entités & classes d'équivalence)", "Combined graph (entities & equivalence classes)"))
     role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
-    draw_combined_graph(scc, adj, labels, scc, labels, simplified, role_map)
+    draw_combined_graph(scc, adj_for_tarjan, labels, scc, labels, simplified, role_map)
 
     st.markdown("---")
     st.subheader(tr("Vue principale (toutes arêtes R/W)", "Main view (all R/W edges)"))
@@ -645,6 +672,7 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
         if st.button("↩️ " + tr("Revenir au graphe principal", "Back to main graph"), key=f"{key_prefix}_back_to_main_graph"):
             st.session_state.selected_component = None
+
 
 
 # ===================== CHINA-WALL CHECK =====================
