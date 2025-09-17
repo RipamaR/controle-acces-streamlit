@@ -374,117 +374,132 @@ def draw_component_graph(df: pd.DataFrame, component_nodes: set):
 
 # =============== SECTION « TABLE + GRAPHE COMBINÉ » =========
 # =============== SECTION « TABLE + GRAPHE COMBINÉ » =========
-def draw_combined_graph(components_1, adj_1, labels_1,
-                        components_2, labels_2, simplified_edges_2, role_data):
+def draw_combined_graph(components_1, adj_1, labels_1, components_2, labels_2, simplified_edges_2, role_data):
     """
-    Affiche un graphe combiné :
-      - En haut : entités/sujets/objets par composantes (components_1 + labels_1)
-      - En bas  : classes d'équivalence/étiquettes (components_2 + labels_2) + relations simplifiées
-    Compatible RBAC (S*/O*) et version générique "Entités".
+    Graphe combiné :
+      - Haut : entités (subjects/objects si RBAC), rangées par SCC, avec arêtes R/W réelles.
+      - Bas  : classes d’équivalence (SCC) + arêtes simplifiées entre classes (Hasse-like).
+    Corrections clés :
+      * On trie (composante, labels) ensemble pour garder l’alignement.
+      * On inclut aussi les nœuds isolés (pas d’arête) pour un rendu fidèle.
+      * On mappe les arêtes entre classes via une 'signature' d’ensemble d’étiquettes.
     """
 
-    # --- Détecter si on est dans un univers RBAC (S*, O*) ou générique
-    all_nodes_c1 = set().union(*(set(c) for c in components_1)) if components_1 else set()
+    # ---------- Détection RBAC vs Entités ----------
+    all_nodes_c1 = set().union(*[set(c) for c in components_1]) if components_1 else set()
     looks_like_rbac = any(isinstance(n, str) and (n.startswith("S") or n.startswith("O")) for n in all_nodes_c1)
+
     if looks_like_rbac:
         allowed_subjects = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("S")}
         allowed_objects  = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("O")}
     else:
-        allowed_subjects = set(all_nodes_c1)  # tout à gauche
-        allowed_objects  = set()              # pas de colonne de droite spécifique
+        # Mode "Entités" : on met tout à gauche, aucune séparation S/O.
+        allowed_subjects = set(all_nodes_c1)
+        allowed_objects  = set()
 
-    # --- Paires (composante, labels) triées par taille décroissante
-    pairs_top    = sorted(zip(components_1, labels_1), key=lambda t: len(t[0]), reverse=True)
-    pairs_bottom = sorted(zip(components_2, labels_2), key=lambda t: len(t[0]), reverse=True)
+    # ---------- On conserve l’alignement composante/labels ----------
+    pairs_top = list(zip(components_1, labels_1))
+    pairs_top.sort(key=lambda t: len(t[0]), reverse=True)  # tri sur la taille de la SCC (desc)
 
-    # --- Mise en page
+    pairs_bottom = list(zip(components_2, labels_2))
+    pairs_bottom.sort(key=lambda t: len(t[0]), reverse=True)
+
+    # ---------- Préparation du réseau ----------
+    net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
+
+    # Espacements visuels
     x_gap, y_gap = 320, 240
     cur_y_left = 0
     cur_y_right = 0
-    node_indices = {}
 
-    # --- Graphe réseau
-    net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
+    node_indices = {}      # nom -> id (pour les arêtes du haut)
+    G1 = nx.DiGraph()      # pour calculer la réduction transitive si DAG
+    role_to_subject = {s: role_data.get(s, (st.session_state.lang == "fr" and "Aucun rôle" or "No role"))
+                       for s in allowed_subjects}
 
-    # --- Rôles par sujet (RBAC)
-    role_to_subject = {s: role_data.get(s, tr("Aucun rôle", "No role")) for s in allowed_subjects}
+    # ---------- Nœuds du haut ----------
+    if looks_like_rbac:
+        # Séparer sujets/objets par composantes, afficher tout, y compris isolés
+        for comp, lbl in pairs_top:
+            subjects = [s for s in comp if s in allowed_subjects]
+            objects  = [o for o in comp if o in allowed_objects]
 
-    # --- Nœuds hauts (composantes d'entités)
-    for component, label in pairs_top:
-        if looks_like_rbac:
-            subjects = [s for s in component if s in allowed_subjects]
-            objects  = [o for o in component if o in allowed_objects]
-
-            for subj in subjects:
-                roles = role_to_subject.get(subj, tr("Aucun rôle", "No role"))
-                combined = _fmt_set(set(label) | {subj})
-                text = f'{subj}({roles}):\n{combined}'
-                net.add_node(subj, label=text, shape='ellipse', x=-x_gap, y=-cur_y_left*y_gap)
+            for subj in sorted(subjects):
+                roles = role_to_subject.get(subj, (st.session_state.lang == "fr" and "Aucun rôle" or "No role"))
+                combined = "{" + ", ".join(sorted((lbl | {subj}))) + "}"
+                text = f"{subj}({roles}):\n{combined}"
+                net.add_node(subj, label=text, shape="ellipse", x=-x_gap, y=-cur_y_left*y_gap)
                 node_indices[subj] = subj
                 cur_y_left += 1
 
-            for obj in objects:
-                combined = _fmt_set(set(label) | {obj})
-                net.add_node(obj, label=f'{obj}:\n{combined}', shape='box', x=x_gap, y=-cur_y_right*y_gap)
+            for obj in sorted(objects):
+                combined = "{" + ", ".join(sorted((lbl | {obj}))) + "}"
+                net.add_node(obj, label=f"{obj}:\n{combined}", shape="box", x=x_gap, y=-cur_y_right*y_gap)
                 node_indices[obj] = obj
                 cur_y_right += 1
-
-            # Si une composante ne contient ni S* ni O* (rare), on la met à gauche
-            others = [n for n in component if (n not in allowed_subjects and n not in allowed_objects)]
-            for ent in others:
-                combined = _fmt_set(set(label) | {ent})
-                net.add_node(ent, label=f'{ent}:\n{combined}', shape='box', x=-x_gap, y=-cur_y_left*y_gap)
-                node_indices[ent] = ent
-                cur_y_left += 1
-        else:
-            # Version générique "Entités" : tout à gauche
-            for ent in sorted(component):
-                combined = _fmt_set(set(label) | {ent})
-                net.add_node(ent, label=f'{ent}:\n{combined}', shape='box', x=-x_gap, y=-cur_y_left*y_gap)
+    else:
+        # Mode "Entités" : tout à gauche
+        for comp, lbl in pairs_top:
+            for ent in sorted(comp):
+                combined = "{" + ", ".join(sorted((lbl | {ent}))) + "}"
+                net.add_node(ent, label=f"{ent}:\n{combined}", shape="box", x=-x_gap, y=-cur_y_left*y_gap)
                 node_indices[ent] = ent
                 cur_y_left += 1
 
-    # --- Arêtes hautes (utiliser adj_1 s'il y en a)
-    #    NB: on ne fait pas de réduction transitive ici pour garder la simplicité visuelle
+    # ---------- Arêtes réelles entre entités (haut) ----------
     for src, dests in adj_1.items():
         for dest in dests:
             if src in node_indices and dest in node_indices:
-                net.add_edge(src, dest, arrows="to")
+                G1.add_edge(src, dest)
 
-    # --- Boîtes du bas : classes / étiquettes
+    # Si c'est un DAG, on peut alléger l'affichage
+    if nx.is_directed_acyclic_graph(G1):
+        G1 = nx.transitive_reduction(G1)
+
+    for s, d in G1.edges():
+        net.add_edge(s, d, arrows="to")
+
+    # ---------- Classes d’équivalence (bas) ----------
+    # Positionnement en grille 3 colonnes
     positions = {0: (-x_gap, 450), 1: (0, 0), 2: (x_gap, 800)}
     offset_y = y_gap
     base_idx = len(net.get_nodes())
 
-    # indexer les labels du bas pour retrouver les nœuds lors du tracé des arêtes simplifiées
-    # On indexe par frozenset pour faciliter la comparaison
-    label_to_index = {}
-    for i, (component, label) in enumerate(pairs_bottom):
-        # Filtre éventuel : si RBAC, on garde les classes qui touchent au moins un nœud vu en haut
-        if looks_like_rbac:
-            if not any(n in all_nodes_c1 for n in component):
-                continue
+    # On crée une signature pour retrouver les nœuds de classes par leur ensemble d’étiquettes
+    def sig(label_set: set) -> tuple:
+        return tuple(sorted(label_set))
 
-        entity_name = ', '.join(component)
-        combined = _fmt_set(set(label) | set(component))
-        text = f'| {entity_name}: {combined} |'
+    label_signature_to_nodeid = {}
+
+    for i, (comp, lbl) in enumerate(pairs_bottom):
+        entity_name = ", ".join(sorted(comp))
+        combined = "{" + ", ".join(sorted(lbl | set(comp))) + "}"
+        text = f"| {entity_name}: {combined} |"
         col = i % 3
         row = i // 3
         x, y = positions[col]
         y += row * offset_y
         node_id = base_idx + i
-        net.add_node(node_id, label=text, shape='box', x=x, y=y,
+        net.add_node(node_id, label=text, shape="box", x=x, y=y,
                      width_constraint=320, height_constraint=110)
-        label_to_index[frozenset(label)] = node_id
+        label_signature_to_nodeid[sig(lbl)] = node_id
 
-    # --- Arêtes simplifiées entre classes (labels)
-    for src_set, dest_set in simplified_edges_2:
-        si = label_to_index.get(frozenset(src_set))
-        di = label_to_index.get(frozenset(dest_set))
-        if si is not None and di is not None:
-            net.add_edge(si, di, arrows="to")
+    # ---------- Arêtes entre classes d’équivalence ----------
+    for src_lblset, dst_lblset in simplified_edges_2:
+        src_id = label_signature_to_nodeid.get(sig(src_lblset))
+        dst_id = label_signature_to_nodeid.get(sig(dst_lblset))
+        if src_id is not None and dst_id is not None:
+            net.add_edge(src_id, dst_id, arrows="to")
 
-    _pyvis_show(net, height="1000px", width="100%")
+    # ---------- Affichage ----------
+    # Si tu as la version _pyvis_show(.., fullpage=True), utilise-la pour la page pleine.
+    try:
+        _pyvis_show(net, fullpage=True)
+    except TypeError:
+        # Si ta version de _pyvis_show n'a pas l'argument fullpage, on passe en grande hauteur classique.
+        _pyvis_show(net, height=1000, width=1800)
+    
+
 
     
 
