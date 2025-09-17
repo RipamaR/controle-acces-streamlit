@@ -309,7 +309,7 @@ def draw_main_graph(df: pd.DataFrame):
         st.info(tr("Aucune donnée pour générer le graphe.", "No data to draw the graph."))
         return
 
-        df_eff = df[df["Permission"].isin(["R", "W"])].copy()
+     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
     
         # 👉 Appliquer les permissions sur les relations R/W
         adj = apply_permissions(df_eff)
