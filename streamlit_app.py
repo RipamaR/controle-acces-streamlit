@@ -1268,13 +1268,14 @@ def main():
         # --- Boutons de téléchargement d'exemples ---
         with st.expander(tr("Téléchargements d'exemples", "Download examples"), expanded=True):
 
-              st.markdown(tr(
+            samples = get_example_excel_bytes()
+
+            st.markdown(tr(
                 "Ces fichiers sont fournis à titre **d’exemple** afin de tester l’application. "
                 "Vous pouvez les télécharger, les importer dans l’onglet ci-dessus, puis visualiser les graphes générés.",
                 "These files are provided as **examples** to test the application. "
                 "You can download them, upload them in the tab above, and then visualize the generated graphs."
-            ))
-            samples = get_example_excel_bytes()
+               ))
         
             col1, col2 = st.columns(2)
             with col1:
