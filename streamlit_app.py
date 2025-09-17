@@ -304,42 +304,39 @@ def draw_main_graph(df: pd.DataFrame):
     if df.empty:
         st.info(tr("Aucune donnée pour générer le graphe.", "No data to draw the graph."))
         return
-    def draw_main_graph(df: pd.DataFrame):
-    if df.empty:
-        st.info(tr("Aucune donnée pour générer le graphe.", "No data to draw the graph."))
-        return
 
-     df_eff = df[df["Permission"].isin(["R", "W"])].copy()
-    
-        # 👉 Appliquer les permissions sur les relations R/W
-        adj = apply_permissions(df_eff)
-    
-        # 👉 Récupérer aussi tous les nœuds isolés
-        all_nodes = collect_all_nodes(df)   # <<< nouvelle fonction qu’on a ajoutée
-        for n in all_nodes:
-            adj.setdefault(n, [])           # garantir que chaque nœud existe même sans arêtes
-    
-        # 👉 Construire le graphe avec TOUS les nœuds
-        G_adj = nx.DiGraph()
-        for u, vs in adj.items():
-            if not vs:
-                G_adj.add_node(u)           # nœud isolé
-            for v in vs:
-                G_adj.add_edge(u, v)
-    
-        scc = list(nx.strongly_connected_components(G_adj))
-        scc_sorted = sorted(scc, key=len)
-    
-        # (reste du code pour placer et dessiner les nœuds)
-        net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
-        for n in sorted(all_nodes):         # ici tu parcours bien TOUS les nœuds
-            shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
-            net.add_node(n, label=n, shape=shape, color="lightblue")
-        for src, dests in adj.items():
-            for d in dests:
-                net.add_edge(src, d, arrows="to")
-    
-        _pyvis_show(net)
+    df_eff = df[df["Permission"].isin(["R", "W"])].copy()
+
+    # 👉 Appliquer les permissions sur les relations R/W
+    adj = apply_permissions(df_eff)
+
+    # 👉 Récupérer aussi tous les nœuds isolés
+    all_nodes = collect_all_nodes(df)   # <<< nouvelle fonction qu’on a ajoutée
+    for n in all_nodes:
+        adj.setdefault(n, [])           # garantir que chaque nœud existe même sans arêtes
+
+    # 👉 Construire le graphe avec TOUS les nœuds
+    G_adj = nx.DiGraph()
+    for u, vs in adj.items():
+        if not vs:
+            G_adj.add_node(u)           # nœud isolé
+        for v in vs:
+            G_adj.add_edge(u, v)
+
+    scc = list(nx.strongly_connected_components(G_adj))
+    scc_sorted = sorted(scc, key=len)
+
+    # (reste du code pour placer et dessiner les nœuds)
+    net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
+    for n in sorted(all_nodes):         # ici tu parcours bien TOUS les nœuds
+        shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
+        net.add_node(n, label=n, shape=shape, color="lightblue")
+    for src, dests in adj.items():
+        for d in dests:
+            net.add_edge(src, d, arrows="to")
+
+    _pyvis_show(net)
+
 
 # =============== GRAPHE D’UN COMPOSANT ======================
 def draw_component_graph(df: pd.DataFrame, component_nodes: set):
