@@ -592,19 +592,15 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
         return
 
     df_expanded = propagate_rbac_from_excel(df)
+
+    # On calcule l’adjacence à partir des R/W s’il y en a…
     df_effective = df_expanded[df_expanded["Permission"].isin(["R", "W"])].copy()
-    if df_effective.empty:
-        st.info(tr("Aucune relation R/W à afficher.", "No R/W relationship to display."))
-        return
+    adj = apply_permissions(df_effective) if not df_effective.empty else {}
 
-    adj = apply_permissions(df_effective)
+    # …mais on prend les nœuds depuis TOUT le DF pour inclure les nœuds isolés
+    active_nodes = collect_all_nodes_from_df(df_expanded)
 
-    # ➕ inclure aussi les nœuds isolés (pas seulement ceux présents sur des arêtes)
-    all_nodes = collect_all_nodes(normalize_df(df_expanded))
-    # S’assurer que chaque nœud existe au moins comme clé vide dans l’adjacence
-    for n in all_nodes:
-        adj.setdefault(n, [])
-    V = sorted(all_nodes)
+    V = sorted(active_nodes)
     scc, cmap = tarjan(V, adj)
     labels = propagate_labels(scc, adj, cmap)
     simplified = simplify_relations(labels)
@@ -641,6 +637,7 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
         draw_component_graph(df_expanded, set(scc[st.session_state.selected_component]))
         if st.button("↩️ " + tr("Revenir au graphe principal", "Back to main graph"), key=f"{key_prefix}_back_to_main_graph"):
             st.session_state.selected_component = None
+
 
 # ===================== CHINA-WALL CHECK =====================
 def _would_violate_china_wall(df_candidate: pd.DataFrame) -> tuple[bool, str | None]:
