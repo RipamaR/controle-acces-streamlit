@@ -304,36 +304,41 @@ def draw_main_graph(df: pd.DataFrame):
     if df.empty:
         st.info(tr("Aucune donnée pour générer le graphe.", "No data to draw the graph."))
         return
-    df_eff = df[df["Permission"].isin(["R", "W"])].copy()
-    if df_eff.empty:
-        st.info(tr("Aucune relation R/W à afficher.", "No R/W relationship to display."))
+    def draw_main_graph(df: pd.DataFrame):
+    if df.empty:
+        st.info(tr("Aucune donnée pour générer le graphe.", "No data to draw the graph."))
         return
+
+    df_eff = df[df["Permission"].isin(["R", "W"])].copy()
+
+    # 👉 Appliquer les permissions sur les relations R/W
     adj = apply_permissions(df_eff)
+
+    # 👉 Récupérer aussi tous les nœuds isolés
+    all_nodes = collect_all_nodes(df)   # <<< nouvelle fonction qu’on a ajoutée
+    for n in all_nodes:
+        adj.setdefault(n, [])           # garantir que chaque nœud existe même sans arêtes
+
+    # 👉 Construire le graphe avec TOUS les nœuds
     G_adj = nx.DiGraph()
     for u, vs in adj.items():
+        if not vs:
+            G_adj.add_node(u)           # nœud isolé
         for v in vs:
             G_adj.add_edge(u, v)
+
     scc = list(nx.strongly_connected_components(G_adj))
     scc_sorted = sorted(scc, key=len)
-    x_step, y_step = 400, 300
-    x_positions = [-2*x_step, -x_step, 0, x_step, 2*x_step]
-    node_pos = {}
-    current_y = 0
-    for comp in scc_sorted:
-        xi = 0
-        for n in comp:
-            node_pos[n] = (x_positions[xi % len(x_positions)], -current_y)
-            xi += 1
-        current_y += y_step
+
+    # (reste du code pour placer et dessiner les nœuds)
     net = Network(notebook=False, height="900px", width="100%", directed=True, cdn_resources="in_line")
-    all_nodes = set(adj.keys()) | {v for lst in adj.values() for v in lst}
-    for n in sorted(all_nodes):
+    for n in sorted(all_nodes):         # ici tu parcours bien TOUS les nœuds
         shape = "ellipse" if isinstance(n, str) and n.startswith("S") else "box"
-        x, y = node_pos.get(n, (0, 0))
-        net.add_node(n, label=n, shape=shape, color="lightblue", x=x, y=y)
+        net.add_node(n, label=n, shape=shape, color="lightblue")
     for src, dests in adj.items():
         for d in dests:
             net.add_edge(src, d, arrows="to")
+
     _pyvis_show(net)
 
 # =============== GRAPHE D’UN COMPOSANT ======================
@@ -364,27 +369,27 @@ def draw_combined_graph(components_1, adj_1, labels_1, components_2, labels_2, s
       * On inclut aussi les nœuds isolés (pas d’arête) pour un rendu fidèle.
       * On mappe les arêtes entre classes via une 'signature' d’ensemble d’étiquettes.
     """
-
-    # ---------- Détection RBAC vs Entités ----------
+    # ➕ Toujours afficher toutes les composantes, même singletons
     all_nodes_c1 = set().union(*[set(c) for c in components_1]) if components_1 else set()
     looks_like_rbac = any(isinstance(n, str) and (n.startswith("S") or n.startswith("O")) for n in all_nodes_c1)
-
     if looks_like_rbac:
         allowed_subjects = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("S")}
         allowed_objects  = {n for n in all_nodes_c1 if isinstance(n, str) and n.startswith("O")}
     else:
-        # Mode "Entités" : on met tout à gauche, aucune séparation S/O.
         allowed_subjects = set(all_nodes_c1)
         allowed_objects  = set()
 
-    # ---------- On conserve l’alignement composante/labels ----------
-    pairs_top = list(zip(components_1, labels_1))
-    pairs_top.sort(key=lambda t: len(t[0]), reverse=True)  # tri sur la taille de la SCC (desc)
+    # IMPORTANT : plus de filtrage sur la présence d’arêtes — on garde tout
+    sorted_components_1 = sorted(components_1, key=len, reverse=True)
+    labels_1_sorted     = [lbl for _, lbl in sorted(zip(components_1, labels_1), key=lambda t: len(t[0]), reverse=True)]
 
-    pairs_bottom = list(zip(components_2, labels_2))
-    pairs_bottom.sort(key=lambda t: len(t[0]), reverse=True)
+    x_gap, y_gap = 320, 240
+    cur_y_left = 0
+    cur_y_right = 0
+    node_indices = {}
+    G1 = nx.DiGraph()
+    role_to_subject = {s: role_data.get(s, tr("Aucun rôle", "No role")) for s in allowed_subjects}
 
-    # ---------- Préparation du réseau ----------
     net = Network(notebook=False, height="1000px", width="100%", directed=True, cdn_resources="in_line")
 
     # Espacements visuels
@@ -509,6 +514,19 @@ def propagate_rbac_from_excel(df: pd.DataFrame) -> pd.DataFrame:
         df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
     return normalize_df(df)
 
+def collect_all_nodes(df: pd.DataFrame) -> set[str]:
+    """Récupère tous les identifiants connus, même sans arêtes."""
+    nodes = set()
+    if "Source" in df.columns:
+        nodes |= {x for x in df["Source"].dropna().astype(str) if x and x.strip().lower() not in _NAN_SET}
+    if "Target" in df.columns:
+        nodes |= {x for x in df["Target"].dropna().astype(str) if x and x.strip().lower() not in _NAN_SET}
+    # Aussi ce que l’utilisateur a créé via commandes
+    nodes |= set(st.session_state.sujets_definis)
+    nodes |= set(st.session_state.objets_definis)
+    return nodes
+
+
 # =============== CHARGEMENT ENTITÉS (E1,E2) =================
 def load_entities_excel(file_bytes: bytes) -> pd.DataFrame:
     df_raw = pd.read_excel(io.BytesIO(file_bytes))
@@ -583,10 +601,13 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
         return
 
     adj = apply_permissions(df_effective)
-    active_nodes = set(adj.keys())
-    for lst in adj.values(): active_nodes.update(lst)
 
-    V = sorted(active_nodes)
+    # ➕ inclure aussi les nœuds isolés (pas seulement ceux présents sur des arêtes)
+    all_nodes = collect_all_nodes(normalize_df(df_expanded))
+    # S’assurer que chaque nœud existe au moins comme clé vide dans l’adjacence
+    for n in all_nodes:
+        adj.setdefault(n, [])
+    V = sorted(all_nodes)
     scc, cmap = tarjan(V, adj)
     labels = propagate_labels(scc, adj, cmap)
     simplified = simplify_relations(labels)
