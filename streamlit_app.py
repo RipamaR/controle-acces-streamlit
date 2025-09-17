@@ -1319,6 +1319,10 @@ def main():
         with st.expander(tr("Aide Excel", "Excel help"), expanded=False):
             st.markdown(excel_help_text())
 
+        with st.expander(tr("Aide des commandes", "Commands help"), expanded=False):
+             st.markdown(terminal_help_text())
+
+
 
         # --- Boutons de téléchargement d'exemples ---
         with st.expander(tr("Téléchargements d'exemples", "Download examples"), expanded=True):
