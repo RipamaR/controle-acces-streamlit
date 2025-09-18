@@ -65,7 +65,8 @@ lang_selected = st.sidebar.radio(
 )
 st.session_state.lang = lang_selected
  # ====== Info bilingue sur traduction et taille des graphes ======
-    st.markdown(tr(
+ # ====== Info bilingue sur traduction et taille des graphes ======
+st.markdown(tr(
         "⚙️ Vous pouvez choisir la langue de l'interface (Français/Anglais) et personnaliser la largeur/hauteur des graphes. "
         "Utilisez la **barre latérale (sidebar)** pour changer la langue ou définir les dimensions des graphes.",
         "⚙️ You can choose the interface language (French/English) and customize the width/height of the graphs. "
