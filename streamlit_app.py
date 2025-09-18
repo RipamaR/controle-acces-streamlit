@@ -650,7 +650,7 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     st.subheader(tr("Table RBAC (si rôles)", "RBAC table (if roles)"))
     display_role_table_streamlit(df_expanded)
 
-     st.markdown("---")
+    st.markdown("---")
     st.subheader(tr("Vue principale (toutes arêtes R/W)", "Main view (all R/W edges)"))
     draw_main_graph(df_expanded)
 
