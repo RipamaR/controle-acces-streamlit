@@ -64,7 +64,13 @@ lang_selected = st.sidebar.radio(
     format_func=lambda code: _lang_labels[code],
 )
 st.session_state.lang = lang_selected
-
+ # ====== Info bilingue sur traduction et taille des graphes ======
+    st.markdown(tr(
+        "⚙️ Vous pouvez choisir la langue de l'interface (Français/Anglais) et personnaliser la largeur/hauteur des graphes. "
+        "Utilisez la **barre latérale (sidebar)** pour changer la langue ou définir les dimensions des graphes.",
+        "⚙️ You can choose the interface language (French/English) and customize the width/height of the graphs. "
+        "Use the **sidebar** to switch language or set graph dimensions."
+    ))
 # Titre
 st.title(tr(
     "🔐 Interface graphique pour la représentation de contrôle de flux de données sécuritaires – DAC / MAC /Muraille de chine / RBAC ",
@@ -1291,17 +1297,7 @@ def get_example_excel_bytes() -> dict:
 
 # ============================== MAIN ==============================
 def main():
-    # ====== Info bilingue sur traduction et taille des graphes ======
-    st.markdown(tr(
-        "ℹ️ Vous pouvez choisir la langue de l'interface (Français/Anglais) et personnaliser la largeur/hauteur des graphes. "
-        "Utilisez la **barre latérale (sidebar)** pour changer la langue ou définir les dimensions des graphes.",
-        "ℹ️ You can choose the interface language (French/English) and customize the width/height of the graphs. "
-        "Use the **sidebar** to switch language or set graph dimensions."
-    ))
-
     
-    # ===================== SIDEBAR ==========================
-    st.sidebar.header(tr("⚙️ Paramètres", "⚙️ Settings"))
     tabs = st.tabs([tr("📂 Fichier Excel", "📂 Excel File"),
                     tr("⌨️ Terminal", "⌨️ Terminal")])
 
