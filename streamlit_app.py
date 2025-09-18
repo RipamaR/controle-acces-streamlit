@@ -651,11 +651,19 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
     display_role_table_streamlit(df_expanded)
 
     st.subheader(tr("Vue principale (toutes arêtes R/W)", "Main view (all R/W edges)"))
+    st.caption(tr(
+    "💡 Dans ce graphe, vous pouvez cliquer sur les entités, les déplacer et réorganiser leur position librement selon vos besoins.",
+    "💡 In this graph, you can click on entities, drag them, and freely reorganize their positions as you wish."
+        ))
     draw_main_graph(df_expanded)
 
     st.markdown("---")
     st.subheader(tr("Graphe combiné (entités & classes d'équivalence)", "Combined graph (entities & equivalence classes)"))
     role_map = df_expanded.set_index("Source")["Role"].to_dict() if "Role" in df_expanded.columns else {}
+    st.caption(tr(
+    "💡 Ce graphe est également interactif : vous pouvez cliquer et déplacer les sujets, objets, rôles et entités pour explorer différentes dispositions.",
+    "💡 This graph is also interactive: you can click and drag subjects, objects, roles, and entities to explore different layouts."
+        ))
     draw_combined_graph(scc, adj_for_tarjan, labels, scc, labels, simplified, role_map)
 
 
