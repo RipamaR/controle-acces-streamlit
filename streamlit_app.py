@@ -1171,7 +1171,7 @@ def excel_help_text() -> str:
             "#### Conseils\n"
             "- Vérifiez l’orthographe exacte des noms de colonnes.\n"
             "- Évitez les cellules vides. Une ligne incomplète sera ignorée.\n"
-            "- Pour le **graphe combiné**, un minimum de relations (R/W ou paires Entity1/Entity2) est requis.\n"
+            "- Pour le **graphe combiné**, à chaque création d’entité, le graphe est automatiquement construit au fur et à mesure.✅\n"
         )
     else:
         return (
@@ -1203,7 +1203,7 @@ def excel_help_text() -> str:
             "#### Tips\n"
             "- Check column names exactly.\n"
             "- Avoid empty cells. Incomplete rows are ignored.\n"
-            "- The **combined graph** needs at least a few relations (R/W or Entity1/Entity2 pairs).\n"
+            "- The **combined graph** with each entity creation, the graph is automatically built as you go.✅\n"
         )
 # --- Mode plein écran pour les graphes (force les iframes pyvis à remplir la page) ---
 if st.session_state.fullscreen_graphs:
