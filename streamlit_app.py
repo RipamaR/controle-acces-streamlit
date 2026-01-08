@@ -1269,6 +1269,11 @@ def terminal_help_text() -> str:
             "(multi : `AssignRole S1 R2 R3`)  \n"
             "Retirer un rôle d’un sujet → `UnassignRole S1 R2`  \n"
             "Modifs : `DelRole R1` · `RenameRole R1 R1X` · `RevokePermission R1 R O1`  \n"
+            "\n"
+            "**GÉNÉRATION ALÉATOIRE (Random)**  \n"
+            "Sans distinction sujet/objet → `Random(e,c)` (ex: `Random(10,20)`)  \n"
+            "Avec sujets/objets → `Random(s,o,c)` (ex: `Random(5,6,15)`)  \n"
+
         )
     else:
         return (
@@ -1311,6 +1316,11 @@ def terminal_help_text() -> str:
             "(multi: `AssignRole S1 R2 R3`)  \n"
             "Remove a role from a subject → `UnassignRole S1 R2`  \n"
             "Edits: `DelRole R1` · `RenameRole R1 R1X` · `RevokePermission R1 R O1`  \n"
+            "\n"
+            "**RANDOM GENERATION (Random)**  \n"
+            "No subject/object split → `Random(e,c)` (ex: `Random(10,20)`)  \n"
+            "With subjects/objects → `Random(s,o,c)` (ex: `Random(5,6,15)`)  \n"
+
         )
 
 
