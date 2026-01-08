@@ -731,182 +731,6 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     command, args = parts[0], parts[1:]
     out = [tr("💬 Commande exécutée", "💬 Command executed") + f": C:\\> {line}"]
 
-        # ==================== RANDOM (génération réseau) ====================
-    # A) Sans distinction sujets/objets : Random(e,c)
-    #    - Crée E1..Ee puis c canaux (E_i, E_j) avec i!=j via mapping direct (pas besoin de tableau)
-    #    - Chaque canal est ajouté sous forme "lecture": AddCh E_i E_j  => (Source=E_j, Permission=R, Target=E_i)
-    # B) Avec distinction sujets/objets : Random(s,o,c)
-    #    - Crée S1..Ss et O1..Oo puis c canaux seulement entre S et O, permission R/W aléatoire
-
-    if command.startswith("Random"):
-        m = re.fullmatch(r"Random\(([^)]*)\)", line.replace(" ", ""))
-        if not m:
-            out.append(tr(
-                "❌ Usage: Random(e,c) ou Random(s,o,c)",
-                "❌ Usage: Random(e,c) or Random(s,o,c)"
-            ))
-            return df, "\n".join(out)
-
-        raw = m.group(1)
-        nums = [x for x in raw.split(",") if x != ""]
-        if not all(n.isdigit() for n in nums):
-            out.append(tr(
-                "❌ Les paramètres doivent être des entiers. Exemple: Random(10,20) ou Random(5,6,15)",
-                "❌ Parameters must be integers. Example: Random(10,20) or Random(5,6,15)"
-            ))
-            return df, "\n".join(out)
-
-        vals = list(map(int, nums))
-
-        def _ensure_entity_exists(eid: str):
-            # Ajoute une ligne "entité seule" si elle n'existe pas déjà
-            if not ((df["Source"] == eid) | (df["Target"] == eid)).any():
-                return pd.concat(
-                    [df, pd.DataFrame([{"Source": eid, "Permission": None, "Target": None, "Role": None, "Heritage": None}])],
-                    ignore_index=True
-                )
-            return df
-
-        def _add_entity_channel(ei: str, ej: str):
-            # AddCh ei ej  => ej lit ei  => Source=ej, Permission=R, Target=ei
-            nonlocal df
-            temp = pd.concat([df, pd.DataFrame([{
-                "Source": ej, "Permission": "R", "Target": ei, "Role": None, "Heritage": None
-            }])], ignore_index=True)
-            violated, msg = _would_violate_china_wall(temp)
-            if violated:
-                return False, msg
-            df = temp
-            return True, None
-
-        def _add_so_channel(sid: str, perm: str, oid: str):
-            nonlocal df
-            temp = pd.concat([df, pd.DataFrame([{
-                "Source": sid, "Permission": perm, "Target": oid, "Role": None, "Heritage": None
-            }])], ignore_index=True)
-            violated, msg = _would_violate_china_wall(temp)
-            if violated:
-                return False, msg
-            df = temp
-            return True, None
-
-        # ---------- Random(e,c) ----------
-        if len(vals) == 2:
-            e, c = vals
-            if e < 1:
-                out.append(tr("❌ e doit être ≥ 1", "❌ e must be ≥ 1"))
-                return df, "\n".join(out)
-
-            # Créer E1..Ee
-            for i in range(1, e + 1):
-                ent = f"E{i}"
-                df = _ensure_entity_exists(ent)
-
-            # Nombre de canaux possibles (sans boucles)
-            n = e * (e - 1)
-            if n == 0:
-                out.append(tr(
-                    f"✅ {e} entité(s) créée(s). Aucun canal possible (e=1).",
-                    f"✅ {e} entity(ies) created. No channel possible (e=1)."
-                ))
-                return df, "\n".join(out)
-
-            c_eff = min(c, n)  # éviter demander + que possible
-            chosen = set()
-
-            # Mapping k -> (i,j) sans tableau :
-            # k in [0..n-1]
-            # i = k // (e-1), j = k % (e-1), puis si j>=i alors j+=1
-            tries = 0
-            while len(chosen) < c_eff and tries < c_eff * 20:
-                k = random.randrange(n)
-                if k in chosen:
-                    tries += 1
-                    continue
-                chosen.add(k)
-                tries += 1
-
-            added = 0
-            blocked = 0
-            for k in chosen:
-                i0 = k // (e - 1)          # 0..e-1
-                j0 = k % (e - 1)           # 0..e-2
-                if j0 >= i0:
-                    j0 += 1
-                ei = f"E{i0 + 1}"
-                ej = f"E{j0 + 1}"
-                ok, _msg = _add_entity_channel(ei, ej)
-                if ok:
-                    added += 1
-                else:
-                    blocked += 1
-
-            out.append(tr(
-                f"✅ Random(e,c) terminé : entités={e}, canaux demandés={c}, canaux ajoutés={added}, bloqués={blocked}.",
-                f"✅ Random(e,c) done: entities={e}, requested={c}, added={added}, blocked={blocked}."
-            ))
-            return df, "\n".join(out)
-
-        # ---------- Random(s,o,c) ----------
-        if len(vals) == 3:
-            s, o, c = vals
-            if s < 1 or o < 1:
-                out.append(tr("❌ s et o doivent être ≥ 1", "❌ s and o must be ≥ 1"))
-                return df, "\n".join(out)
-
-            # Créer sujets + objets
-            for i in range(1, s + 1):
-                sid = f"S{i}"
-                if sid not in st.session_state.sujets_definis:
-                    st.session_state.sujets_definis.add(sid)
-                df = _ensure_entity_exists(sid)
-
-            for j in range(1, o + 1):
-                oid = f"O{j}"
-                if oid not in st.session_state.objets_definis:
-                    st.session_state.objets_definis.add(oid)
-                # on garde la logique "objet existe" aussi côté DF
-                # (ligne neutre) :
-                if not ((df["Target"] == oid) | (df["Source"] == oid)).any():
-                    df = pd.concat([df, pd.DataFrame([{
-                        "Source": None, "Permission": None, "Target": oid, "Role": None, "Heritage": None
-                    }])], ignore_index=True)
-
-            # Canaux possibles S<->O (avec R/W, mais toujours entre S et O)
-            # On ne force pas l’unicité stricte (sinon ça devient lourd), mais on évite les doublons exacts.
-            added = 0
-            blocked = 0
-            attempts = 0
-            max_attempts = max(c * 20, 50)
-
-            while added < c and attempts < max_attempts:
-                attempts += 1
-                sid = f"S{random.randint(1, s)}"
-                oid = f"O{random.randint(1, o)}"
-                perm = random.choice(["R", "W"])
-
-                # éviter doublon exact
-                if ((df["Source"] == sid) & (df["Permission"] == perm) & (df["Target"] == oid)).any():
-                    continue
-
-                ok, _msg = _add_so_channel(sid, perm, oid)
-                if ok:
-                    added += 1
-                else:
-                    blocked += 1
-
-            out.append(tr(
-                f"✅ Random(s,o,c) terminé : sujets={s}, objets={o}, canaux demandés={c}, canaux ajoutés={added}, bloqués={blocked}.",
-                f"✅ Random(s,o,c) done: subjects={s}, objects={o}, requested={c}, added={added}, blocked={blocked}."
-            ))
-            return df, "\n".join(out)
-
-        out.append(tr(
-            "❌ Usage: Random(e,c) ou Random(s,o,c)",
-            "❌ Usage: Random(e,c) or Random(s,o,c)"
-        ))
-        return df, "\n".join(out)
-
     # ==================== ENTITÉS (générique) ====================
     if command == "AddEnt" and len(args) == 1:
         e = _norm_entity(args[0])
@@ -1270,12 +1094,6 @@ def terminal_help_text() -> str:
             "(multi : `AssignRole S1 R2 R3`)  \n"
             "Retirer un rôle d’un sujet → `UnassignRole S1 R2`  \n"
             "Modifs : `DelRole R1` · `RenameRole R1 R1X` · `RevokePermission R1 R O1`  \n"
-
-                        "\n"
-            "**GÉNÉRATION ALÉATOIRE (Random)**  \n"
-            "Sans distinction sujet/objet → `Random(e,c)` (ex: `Random(10,20)`)  \n"
-            "Avec sujets/objets → `Random(s,o,c)` (ex: `Random(5,6,15)`)  \n"
-
         )
     else:
         return (
@@ -1318,11 +1136,6 @@ def terminal_help_text() -> str:
             "(multi: `AssignRole S1 R2 R3`)  \n"
             "Remove a role from a subject → `UnassignRole S1 R2`  \n"
             "Edits: `DelRole R1` · `RenameRole R1 R1X` · `RevokePermission R1 R O1`  \n"
-                        "\n"
-            "**RANDOM GENERATION (Random)**  \n"
-            "No subject/object split → `Random(e,c)` (ex: `Random(10,20)`)  \n"
-            "With subjects/objects → `Random(s,o,c)` (ex: `Random(5,6,15)`)  \n"
-
         )
 
 
@@ -1582,4 +1395,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
