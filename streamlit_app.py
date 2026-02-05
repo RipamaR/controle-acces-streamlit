@@ -1564,12 +1564,12 @@ def main():
             placeholder=tr("Ex: AssignRole S1 R2 R3", "Ex: AssignRole S1 R2 R3"),
             on_change=_run_command_callback,
         )
-            st.text_area(
+        st.text_area(
                 tr("Historique", "History"),
                 value="\n\n".join(st.session_state.history),
                 height=340,
                 disabled=True
-                )
+        )
 
     
         st.markdown("---")
