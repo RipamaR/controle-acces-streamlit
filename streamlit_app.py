@@ -1564,13 +1564,13 @@ def main():
             placeholder=tr("Ex: AssignRole S1 R2 R3", "Ex: AssignRole S1 R2 R3"),
             on_change=_run_command_callback,
         )
-        st.text_area(
+                st.text_area(
             tr("Historique", "History"),
-            "\n\n".join(st.session_state.history),
+            value="\n\n".join(st.session_state.history),
             height=340,
-            key="history_box_terminal",
             disabled=True
         )
+
     
         st.markdown("---")
         st.subheader(tr("Graphes (issus des commandes)", "Graphs (from commands)"))
