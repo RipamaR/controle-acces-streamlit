@@ -1569,6 +1569,7 @@ def main():
             "\n\n".join(st.session_state.history),
             height=340,
             key="history_box_terminal",
+            disabled=True
         )
     
         st.markdown("---")
