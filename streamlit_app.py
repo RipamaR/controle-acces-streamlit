@@ -1155,49 +1155,55 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         df = temp
         out.append(tr(f"✅ Canal ajouté: {s} --{perm}--> {o}", f"✅ Channel added: {s} --{perm}--> {o}")); return df, "\n".join(out)
 
-        if command == "Never":
-            raw = line.strip()
-    
-            # extrait le contenu entre accolades: { ... }
-            blocks = re.findall(r"\{([^}]*)\}", raw)
-    
-            def _split_items(s: str) -> list[str]:
-                return [x.strip() for x in s.split(",") if x.strip()]
-    
-            if " for " in raw:
-                # Never {A,B} for {E1,E2}
-                if len(blocks) >= 2:
-                    etiquettes = _split_items(blocks[0])
-                    entites = _split_items(blocks[1])
-                else:
-                    # fallback sans accolades
-                    parts2 = raw.split()
-                    if "for" not in parts2:
-                        out.append(tr("❌ Usage: Never {A,B} for {E}", "❌ Usage: Never {A,B} for {E}"))
-                        return df, "\n".join(out)
-                    idx = parts2.index("for")
-                    etiquettes = [p.strip("{} ,") for p in parts2[1:idx] if p.strip("{} ,")]
-                    entites = [p.strip("{} ,") for p in parts2[idx+1:] if p.strip("{} ,")]
-    
-                if not etiquettes or not entites:
+            # ==================== CHINA-WALL : Never ... ====================
+    # Supporte :
+    #  - Never {O1,O2}
+    #  - Never {O1,O2} for {S3}
+    #  - Never {O1, O2} for {S3, S4}
+    m_never = re.match(r"(?i)^\s*never\b", line)
+    if m_never:
+        raw = line.strip()
+
+        # récupère tout ce qui est entre { ... }
+        blocks = re.findall(r"\{([^}]*)\}", raw)
+
+        def _split_items(s: str) -> list[str]:
+            return [x.strip() for x in s.split(",") if x.strip()]
+
+        # cas avec "for"
+        if re.search(r"(?i)\sfor\s", raw):
+            if len(blocks) >= 2:
+                etiquettes = _split_items(blocks[0])
+                entites = _split_items(blocks[1])
+            else:
+                # fallback si pas d'accolades
+                tmp = raw.split()
+                if "for" not in tmp:
                     out.append(tr("❌ Usage: Never {A,B} for {E}", "❌ Usage: Never {A,B} for {E}"))
                     return df, "\n".join(out)
-    
-                for ent in entites:
-                    st.session_state.interdictions_entites.setdefault(ent, []).append(etiquettes)
-    
-                out.append(tr(
-                    f"🚧 Combinaison interdite {etiquettes} pour entités: {entites}",
-                    f"🚧 Forbidden combination {etiquettes} for entities: {entites}"
-                ))
+                idx = tmp.index("for")
+                etiquettes = [p.strip("{} ,") for p in tmp[1:idx] if p.strip("{} ,")]
+                entites = [p.strip("{} ,") for p in tmp[idx+1:] if p.strip("{} ,")]
+
+            if not etiquettes or not entites:
+                out.append(tr("❌ Usage: Never {A,B} for {E}", "❌ Usage: Never {A,B} for {E}"))
                 return df, "\n".join(out)
 
-        # Never {A,B} (global)
+            for ent in entites:
+                st.session_state.interdictions_entites.setdefault(ent, []).append(etiquettes)
+
+            out.append(tr(
+                f"🚧 Combinaison interdite {etiquettes} pour entités: {entites}",
+                f"🚧 Forbidden combination {etiquettes} for entities: {entites}"
+            ))
+            return df, "\n".join(out)
+
+        # cas global: Never {A,B}
         if len(blocks) >= 1:
             etiquettes = _split_items(blocks[0])
         else:
-            parts2 = raw.split()
-            etiquettes = [p.strip("{} ,") for p in parts2[1:] if p.strip("{} ,")]
+            tmp = raw.split()
+            etiquettes = [p.strip("{} ,") for p in tmp[1:] if p.strip("{} ,")]
 
         if not etiquettes:
             out.append(tr("❌ Usage: Never {A,B}", "❌ Usage: Never {A,B}"))
