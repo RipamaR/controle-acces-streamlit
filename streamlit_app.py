@@ -701,7 +701,7 @@ def _would_violate_china_wall(df_candidate: pd.DataFrame) -> tuple[bool, str | N
 
     for comp in labels:
         for interdit in st.session_state.interdictions_globales:
-            if set(interdit).issubset(comp):
+            if set(interdit) & set(comp):
                 return True, tr(
                     f"⛔ CHINA WALL : restriction globale violée pour {interdit}",
                     f"⛔ CHINA WALL: global restriction violated for {interdit}"
