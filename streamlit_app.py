@@ -1154,21 +1154,61 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         df = temp
         out.append(tr(f"✅ Canal ajouté: {s} --{perm}--> {o}", f"✅ Channel added: {s} --{perm}--> {o}")); return df, "\n".join(out)
 
-    if command == "Never":
-        if "for" in args:
-            idx = args.index("for")
-            etiquettes = [e.strip("{} ,") for e in args[:idx]]
-            entites = [e.strip("{} ,") for e in args[idx+1:]]
+        if command == "Never":
+        raw = line.strip()
+
+        # extrait le contenu entre accolades: { ... }
+        blocks = re.findall(r"\{([^}]*)\}", raw)
+
+        def _split_items(s: str) -> list[str]:
+            return [x.strip() for x in s.split(",") if x.strip()]
+
+        if " for " in raw:
+            # Never {A,B} for {E1,E2}
+            if len(blocks) >= 2:
+                etiquettes = _split_items(blocks[0])
+                entites = _split_items(blocks[1])
+            else:
+                # fallback sans accolades
+                parts2 = raw.split()
+                if "for" not in parts2:
+                    out.append(tr("❌ Usage: Never {A,B} for {E}", "❌ Usage: Never {A,B} for {E}"))
+                    return df, "\n".join(out)
+                idx = parts2.index("for")
+                etiquettes = [p.strip("{} ,") for p in parts2[1:idx] if p.strip("{} ,")]
+                entites = [p.strip("{} ,") for p in parts2[idx+1:] if p.strip("{} ,")]
+
+            if not etiquettes or not entites:
+                out.append(tr("❌ Usage: Never {A,B} for {E}", "❌ Usage: Never {A,B} for {E}"))
+                return df, "\n".join(out)
+
             for ent in entites:
                 st.session_state.interdictions_entites.setdefault(ent, []).append(etiquettes)
-            out.append(tr(f"🚧 Combinaison interdite {etiquettes} pour entités: {entites}",
-                          f"🚧 Forbidden combination {etiquettes} for entities: {entites}"))
+
+            out.append(tr(
+                f"🚧 Combinaison interdite {etiquettes} pour entités: {entites}",
+                f"🚧 Forbidden combination {etiquettes} for entities: {entites}"
+            ))
             return df, "\n".join(out)
-        etiquettes = [e.strip("{} ,") for e in args]
+
+        # Never {A,B} (global)
+        if len(blocks) >= 1:
+            etiquettes = _split_items(blocks[0])
+        else:
+            parts2 = raw.split()
+            etiquettes = [p.strip("{} ,") for p in parts2[1:] if p.strip("{} ,")]
+
+        if not etiquettes:
+            out.append(tr("❌ Usage: Never {A,B}", "❌ Usage: Never {A,B}"))
+            return df, "\n".join(out)
+
         st.session_state.interdictions_globales.append(etiquettes)
-        out.append(tr(f"🚧 Combinaison globalement interdite: {etiquettes}",
-                      f"🚧 Globally forbidden combination: {etiquettes}"))
+        out.append(tr(
+            f"🚧 Combinaison globalement interdite: {etiquettes}",
+            f"🚧 Globally forbidden combination: {etiquettes}"
+        ))
         return df, "\n".join(out)
+
 
     if command == "RemoveGlobalBlock" and args:
         target = [e.strip("{} ,") for e in args]
