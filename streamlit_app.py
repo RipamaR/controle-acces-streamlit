@@ -1146,6 +1146,17 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
     # -------- China Wall --------
     if command == "AddCh" and len(args) == 3:
         s, perm, o = _norm_entity(args[0]), _norm_perm(args[1]), _norm_entity(args[2])
+                # ✅ Blocage direct immédiat (liste noire)
+        # Si Never {O1,O2} for {S3} => S3 ne peut PAS créer AddCh S3 R O1 ni AddCh S3 R O2
+        forbidden_lists = st.session_state.interdictions_entites.get(s, [])
+        forbidden_flat = {x for L in forbidden_lists for x in L}  # flatten
+        if o in forbidden_flat:
+            out.append(tr(
+                f"⛔ Bloqué : CHINA WALL — '{s}' ne peut pas accéder à '{o}' (règle Never).",
+                f"⛔ Blocked: CHINA WALL — '{s}' cannot access '{o}' (Never rule)."
+            ))
+            return df, "\n".join(out)
+
         if perm not in {"R","W"}:
             out.append(tr("❌ La permission doit être R ou W.", "❌ Permission must be R or W.")); return df, "\n".join(out)
         temp = pd.concat([df, pd.DataFrame([{"Source":s,"Permission":perm,"Target":o,"Role":None,"Heritage":None}])], ignore_index=True)
