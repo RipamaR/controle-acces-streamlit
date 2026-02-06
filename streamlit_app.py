@@ -1269,6 +1269,95 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append(tr(f"🧹 Blocages effacés pour {ent} ({count}).", f"🧹 Blocks cleared for {ent} ({count})."))
         return df, "\n".join(out)
 
+        # --- Alias commandes (compatibilité) ---
+    alias = {
+        "RemoveSub": "DelSub",
+        "RemoveObj": "DelObj",
+        "RemoveEnt": "DelEnt",
+        "RemoveCh":  "RemoveCh",   # on va l'implémenter juste après
+        "RemoveRole": "DelRole",
+    }
+    command = alias.get(command, command)
+    if command == "DelSub" and len(args) == 1:
+        s = _norm_entity(args[0])
+        if not s or s not in st.session_state.sujets_definis:
+            out.append(tr(f"❌ Sujet '{s}' introuvable.", f"❌ Subject '{s}' not found."))
+            return df, "\n".join(out)
+
+        before = len(df)
+        # On supprime toutes les lignes où S est Source ou Target
+        df = df[~((df["Source"] == s) | (df["Target"] == s))]
+
+        st.session_state.sujets_definis.discard(s)
+        st.session_state.subject_roles.pop(s, None)
+        st.session_state.interdictions_entites.pop(s, None)
+
+        out.append(tr(
+            f"🗑️ Sujet '{s}' supprimé ({before - len(df)} ligne(s)).",
+            f"🗑️ Subject '{s}' removed ({before - len(df)} row(s))."
+        ))
+        return df, "\n".join(out)
+    if command == "DelObj" and len(args) == 1:
+        o = _norm_entity(args[0])
+        if not o or o not in st.session_state.objets_definis:
+            out.append(tr(f"❌ Objet '{o}' introuvable.", f"❌ Object '{o}' not found."))
+            return df, "\n".join(out)
+
+        before = len(df)
+        # On supprime toutes les lignes où l'objet apparaît
+        df = df[~((df["Source"] == o) | (df["Target"] == o))]
+
+        st.session_state.objets_definis.discard(o)
+
+        # Retirer aussi les permissions de rôles portant sur cet objet
+        for role, perms in st.session_state.role_permissions.items():
+            st.session_state.role_permissions[role] = {(p, obj) for (p, obj) in perms if obj != o}
+
+        out.append(tr(
+            f"🗑️ Objet '{o}' supprimé ({before - len(df)} ligne(s)).",
+            f"🗑️ Object '{o}' removed ({before - len(df)} row(s))."
+        ))
+        return df, "\n".join(out)
+    if command == "RemoveCh":
+        # Supporte:
+        # - RemoveCh E1 E2      (version entités -> enlève Source=E2, Permission=R, Target=E1)
+        # - RemoveCh S1 R O1    (version R/W -> enlève Source=S1, Permission=R/W, Target=O1)
+
+        if len(args) == 2:
+            e1, e2 = _norm_entity(args[0]), _norm_entity(args[1])
+            if not e1 or not e2:
+                out.append(tr("❌ Usage: RemoveCh E1 E2", "❌ Usage: RemoveCh E1 E2"))
+                return df, "\n".join(out)
+
+            before = len(df)
+            df = df[~((df["Source"] == e2) & (df["Permission"] == "R") & (df["Target"] == e1))]
+            out.append(tr(
+                f"🗑️ Canal supprimé (entités): {before - len(df)}",
+                f"🗑️ Channel removed (entities): {before - len(df)}"
+            ))
+            return df, "\n".join(out)
+
+        if len(args) == 3:
+            s, perm, o = _norm_entity(args[0]), _norm_perm(args[1]), _norm_entity(args[2])
+            if perm not in {"R", "W"} or not s or not o:
+                out.append(tr("❌ Usage: RemoveCh S1 R O1", "❌ Usage: RemoveCh S1 R O1"))
+                return df, "\n".join(out)
+
+            before = len(df)
+            df = df[~((df["Source"] == s) & (df["Permission"] == perm) & (df["Target"] == o))]
+            out.append(tr(
+                f"🗑️ Canal supprimé: {before - len(df)}",
+                f"🗑️ Channel removed: {before - len(df)}"
+            ))
+            return df, "\n".join(out)
+
+        out.append(tr(
+            "❌ Usage: RemoveCh E1 E2  OU  RemoveCh S1 R O1",
+            "❌ Usage: RemoveCh E1 E2  OR  RemoveCh S1 R O1"
+        ))
+        return df, "\n".join(out)
+    
+
     if command == "show":
         process_data_display(df, key_prefix="terminal_show")
         out.append(tr("🚀 Génération des graphes…", "🚀 Generating graphs…"))
