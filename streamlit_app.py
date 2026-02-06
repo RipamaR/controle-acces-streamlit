@@ -709,11 +709,13 @@ def _would_violate_china_wall(df_candidate: pd.DataFrame) -> tuple[bool, str | N
         for ent, combos in st.session_state.interdictions_entites.items():
             if ent in comp:
                 for interdit in combos:
-                    if set(interdit).issubset(comp):
+                    # ✅ bloque si AU MOINS UN élément interdit est présent dans le label de ent
+                    if set(interdit) & set(comp):
                         return True, tr(
                             f"⛔ CHINA WALL : restriction violée pour {ent}: {interdit}",
                             f"⛔ CHINA WALL: restriction violated for {ent}: {interdit}"
-                        )
+                )
+
     return False, None
 
 # =============== TERMINAL : COMMANDES ======================
