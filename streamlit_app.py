@@ -1195,121 +1195,121 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
 
             # ==================== CHINA-WALL : Never ... ====================
 
-if command == "Never":
-    raw = line.strip()
-
-    blocks = re.findall(r"\{([^}]*)\}", raw)
-
-    def _split_items_norm(s: str) -> list[str]:
-        items = []
-        for x in s.split(","):
-            x = x.strip()
-            if not x:
-                continue
-            nxv = _norm_entity(x)
-            if nxv:
-                items.append(nxv)
-        return items
-
-    def _dedup_list_of_lists(L: list[list[str]]) -> list[list[str]]:
-        # évite les doublons de combinaisons (ordre ignoré)
-        seen = set()
-        outL = []
-        for combo in L:
-            key = tuple(sorted(combo))
-            if key not in seen:
-                seen.add(key)
-                outL.append(combo)
-        return outL
-
-    def _check_new_rule_is_consistent() -> tuple[bool, str | None]:
-        """
-        Vérifie que l'ajout de la nouvelle règle n'est pas déjà violé
-        par l'état ACTUEL du graphe (df courant).
-        """
-        violated, msg = _would_violate_china_wall(df)
-        if violated:
-            return False, msg
-        return True, None
-
-    # Détecte la forme "... for ..."
-    if "for" in raw.split():
-        # Cas : Never {A,B,C} for {X,Y,Z}
-        if len(blocks) >= 2:
-            combo = _split_items_norm(blocks[0])
-            targets = _split_items_norm(blocks[1])
-        else:
-            parts2 = raw.split()
-            if "for" not in parts2:
+    if command == "Never":
+        raw = line.strip()
+    
+        blocks = re.findall(r"\{([^}]*)\}", raw)
+    
+        def _split_items_norm(s: str) -> list[str]:
+            items = []
+            for x in s.split(","):
+                x = x.strip()
+                if not x:
+                    continue
+                nxv = _norm_entity(x)
+                if nxv:
+                    items.append(nxv)
+            return items
+    
+        def _dedup_list_of_lists(L: list[list[str]]) -> list[list[str]]:
+            # évite les doublons de combinaisons (ordre ignoré)
+            seen = set()
+            outL = []
+            for combo in L:
+                key = tuple(sorted(combo))
+                if key not in seen:
+                    seen.add(key)
+                    outL.append(combo)
+            return outL
+    
+        def _check_new_rule_is_consistent() -> tuple[bool, str | None]:
+            """
+            Vérifie que l'ajout de la nouvelle règle n'est pas déjà violé
+            par l'état ACTUEL du graphe (df courant).
+            """
+            violated, msg = _would_violate_china_wall(df)
+            if violated:
+                return False, msg
+            return True, None
+    
+        # Détecte la forme "... for ..."
+        if "for" in raw.split():
+            # Cas : Never {A,B,C} for {X,Y,Z}
+            if len(blocks) >= 2:
+                combo = _split_items_norm(blocks[0])
+                targets = _split_items_norm(blocks[1])
+            else:
+                parts2 = raw.split()
+                if "for" not in parts2:
+                    out.append(tr("❌ Usage: Never {A,B,C} for {X,Y}", "❌ Usage: Never {A,B,C} for {X,Y}"))
+                    return df, "\n".join(out)
+                idx = parts2.index("for")
+                combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:idx]]
+                combo = [x for x in combo if x]
+                targets = [_norm_entity(p.strip("{} ,")) for p in parts2[idx + 1:]]
+                targets = [x for x in targets if x]
+    
+            if not combo or not targets:
                 out.append(tr("❌ Usage: Never {A,B,C} for {X,Y}", "❌ Usage: Never {A,B,C} for {X,Y}"))
                 return df, "\n".join(out)
-            idx = parts2.index("for")
-            combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:idx]]
-            combo = [x for x in combo if x]
-            targets = [_norm_entity(p.strip("{} ,")) for p in parts2[idx + 1:]]
-            targets = [x for x in targets if x]
-
-        if not combo or not targets:
-            out.append(tr("❌ Usage: Never {A,B,C} for {X,Y}", "❌ Usage: Never {A,B,C} for {X,Y}"))
+    
+            # --- Sauvegarde (rollback si la règle est déjà violée) ---
+            old_ent = {k: [c[:] for c in v] for k, v in st.session_state.interdictions_entites.items()}
+    
+            # Ajout + dédup
+            for ent in targets:
+                st.session_state.interdictions_entites.setdefault(ent, []).append(combo)
+                st.session_state.interdictions_entites[ent] = _dedup_list_of_lists(st.session_state.interdictions_entites[ent])
+    
+            ok, msg = _check_new_rule_is_consistent()
+            if not ok:
+                # rollback
+                st.session_state.interdictions_entites = old_ent
+                out.append(tr(
+                    f"⛔ Règle refusée : elle est déjà violée par l'état actuel. Détail: {msg}",
+                    f"⛔ Rule rejected: it is already violated by the current state. Detail: {msg}"
+                ))
+                return df, "\n".join(out)
+    
+            out.append(tr(
+                f"🚧 Combinaison interdite {combo} pour entités: {targets}",
+                f"🚧 Forbidden combination {combo} for entities: {targets}"
+            ))
             return df, "\n".join(out)
-
+    
+        # Cas global : Never {A,B,C}
+        if len(blocks) >= 1:
+            combo = _split_items_norm(blocks[0])
+        else:
+            parts2 = raw.split()
+            combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:]]
+            combo = [x for x in combo if x]
+    
+        if not combo:
+            out.append(tr("❌ Usage: Never {A,B,C}", "❌ Usage: Never {A,B,C}"))
+            return df, "\n".join(out)
+    
         # --- Sauvegarde (rollback si la règle est déjà violée) ---
-        old_ent = {k: [c[:] for c in v] for k, v in st.session_state.interdictions_entites.items()}
-
-        # Ajout + dédup
-        for ent in targets:
-            st.session_state.interdictions_entites.setdefault(ent, []).append(combo)
-            st.session_state.interdictions_entites[ent] = _dedup_list_of_lists(st.session_state.interdictions_entites[ent])
-
+        old_glob = [c[:] for c in st.session_state.interdictions_globales]
+    
+        st.session_state.interdictions_globales.append(combo)
+        st.session_state.interdictions_globales = _dedup_list_of_lists(st.session_state.interdictions_globales)
+    
         ok, msg = _check_new_rule_is_consistent()
         if not ok:
             # rollback
-            st.session_state.interdictions_entites = old_ent
+            st.session_state.interdictions_globales = old_glob
             out.append(tr(
                 f"⛔ Règle refusée : elle est déjà violée par l'état actuel. Détail: {msg}",
                 f"⛔ Rule rejected: it is already violated by the current state. Detail: {msg}"
             ))
             return df, "\n".join(out)
-
+    
         out.append(tr(
-            f"🚧 Combinaison interdite {combo} pour entités: {targets}",
-            f"🚧 Forbidden combination {combo} for entities: {targets}"
+            f"🚧 Combinaison globalement interdite: {combo}",
+            f"🚧 Globally forbidden combination: {combo}"
         ))
         return df, "\n".join(out)
-
-    # Cas global : Never {A,B,C}
-    if len(blocks) >= 1:
-        combo = _split_items_norm(blocks[0])
-    else:
-        parts2 = raw.split()
-        combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:]]
-        combo = [x for x in combo if x]
-
-    if not combo:
-        out.append(tr("❌ Usage: Never {A,B,C}", "❌ Usage: Never {A,B,C}"))
-        return df, "\n".join(out)
-
-    # --- Sauvegarde (rollback si la règle est déjà violée) ---
-    old_glob = [c[:] for c in st.session_state.interdictions_globales]
-
-    st.session_state.interdictions_globales.append(combo)
-    st.session_state.interdictions_globales = _dedup_list_of_lists(st.session_state.interdictions_globales)
-
-    ok, msg = _check_new_rule_is_consistent()
-    if not ok:
-        # rollback
-        st.session_state.interdictions_globales = old_glob
-        out.append(tr(
-            f"⛔ Règle refusée : elle est déjà violée par l'état actuel. Détail: {msg}",
-            f"⛔ Rule rejected: it is already violated by the current state. Detail: {msg}"
-        ))
-        return df, "\n".join(out)
-
-    out.append(tr(
-        f"🚧 Combinaison globalement interdite: {combo}",
-        f"🚧 Globally forbidden combination: {combo}"
-    ))
-    return df, "\n".join(out)
 
 
 
