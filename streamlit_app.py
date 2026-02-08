@@ -687,37 +687,64 @@ def process_data_display(df: pd.DataFrame, key_prefix: str = "default"):
 
 
 
-# ===================== CHINA-WALL CHECK =====================
+
+# ======================= CHINA-WALL CHECK =====================
 def _would_violate_china_wall(df_candidate: pd.DataFrame) -> tuple[bool, str | None]:
+    """
+    Sémantique "combinaison complète" (subset) :
+
+    1) Never {A, B, C}
+       -> Aucune étiquette (propagée) ne doit contenir simultanément A,B,C.
+
+    2) Never {A, B, C} for {X, Y}
+       -> Pour chaque entité cible X ou Y :
+          son étiquette (propagée) ne doit jamais contenir simultanément A,B,C.
+
+    IMPORTANT :
+    - Cette vérification se fait via Tarjan + propagation d'étiquettes.
+    - On n'utilise PAS une logique "liste noire" (OR). C'est bien un "tous ensemble".
+    """
+
     dfe = df_candidate[df_candidate["Permission"].isin(["R", "W"])].copy()
     if dfe.empty:
         return False, None
+
     adj = apply_permissions(dfe)
+
+    # Inclure tous les noeuds présents (sources + cibles), même si isolés
     V = sorted(set(adj.keys()) | {v for vs in adj.values() for v in vs})
     if not V:
         return False, None
-    scc, cmap = tarjan(V, adj)
-    labels = propagate_labels(scc, adj, cmap)
 
-    for comp in labels:
+    # Garantir la présence de tous les noeuds dans l'adj
+    adj_for_tarjan = {v: adj.get(v, []) for v in V}
+
+    scc, cmap = tarjan(V, adj_for_tarjan)
+    labels = propagate_labels(scc, adj_for_tarjan, cmap)
+
+    # labels est une liste de sets (étiquettes propgées par composante)
+    for comp_label in labels:
+        # ----- Restrictions globales : Never {A,B,C}
         for interdit in st.session_state.interdictions_globales:
-            if set(interdit) & set(comp):
+            if set(interdit).issubset(comp_label):
                 return True, tr(
                     f"⛔ CHINA WALL : restriction globale violée pour {interdit}",
                     f"⛔ CHINA WALL: global restriction violated for {interdit}"
                 )
-            for ent, combos in st.session_state.interdictions_entites.items():
-                if ent in comp:
-                    for interdit in combos:
-                        # ✅ bloque si AU MOINS UN élément interdit est présent
-                        if set(interdit) & set(comp):
-                            return True, tr(
-                                f"⛔ CHINA WALL : restriction violée pour {ent}: {interdit}",
-                                f"⛔ CHINA WALL: restriction violated for {ent}: {interdit}"
-                            )
 
+        # ----- Restrictions ciblées : Never {A,B,C} for {X,Y}
+        # Ici, pour une entité cible 'ent', on interdit que SON étiquette contienne toute la combinaison.
+        for ent, combos in st.session_state.interdictions_entites.items():
+            if ent in comp_label:
+                for interdit in combos:
+                    if set(interdit).issubset(comp_label):
+                        return True, tr(
+                            f"⛔ CHINA WALL : restriction violée pour {ent}: {interdit}",
+                            f"⛔ CHINA WALL: restriction violated for {ent}: {interdit}"
+                        )
 
     return False, None
+
 
 # =============== TERMINAL : COMMANDES ======================
 def apply_prompt(global_data: pd.DataFrame, prompt: str):
@@ -1167,65 +1194,80 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
         out.append(tr(f"✅ Canal ajouté: {s} --{perm}--> {o}", f"✅ Channel added: {s} --{perm}--> {o}")); return df, "\n".join(out)
 
             # ==================== CHINA-WALL : Never ... ====================
-    # Supporte :
-    #  - Never {O1,O2}
-    #  - Never {O1,O2} for {S3}
-    #  - Never {O1, O2} for {S3, S4}
-    m_never = re.match(r"(?i)^\s*never\b", line)
-    if m_never:
-        raw = line.strip()
 
-        # récupère tout ce qui est entre { ... }
-        blocks = re.findall(r"\{([^}]*)\}", raw)
+if command == "Never":
+    raw = line.strip()
 
-        def _split_items(s: str) -> list[str]:
-            return [x.strip() for x in s.split(",") if x.strip()]
+    # Extrait le contenu entre accolades { ... }
+    # Exemple: "Never {S3, O1, O2} for {S4, O4, O5}"
+    blocks = re.findall(r"\{([^}]*)\}", raw)
 
-        # cas avec "for"
-        if re.search(r"(?i)\sfor\s", raw):
-            if len(blocks) >= 2:
-                etiquettes = _split_items(blocks[0])
-                entites = _split_items(blocks[1])
-            else:
-                # fallback si pas d'accolades
-                tmp = raw.split()
-                if "for" not in tmp:
-                    out.append(tr("❌ Usage: Never {A,B} for {E}", "❌ Usage: Never {A,B} for {E}"))
-                    return df, "\n".join(out)
-                idx = tmp.index("for")
-                etiquettes = [p.strip("{} ,") for p in tmp[1:idx] if p.strip("{} ,")]
-                entites = [p.strip("{} ,") for p in tmp[idx+1:] if p.strip("{} ,")]
+    def _split_items_norm(s: str) -> list[str]:
+        # split par virgule + normalisation des IDs (S001 -> S1, o2 -> O2)
+        items = []
+        for x in s.split(","):
+            x = x.strip()
+            if not x:
+                continue
+            nxv = _norm_entity(x)
+            if nxv:
+                items.append(nxv)
+        return items
 
-            if not etiquettes or not entites:
-                out.append(tr("❌ Usage: Never {A,B} for {E}", "❌ Usage: Never {A,B} for {E}"))
-                return df, "\n".join(out)
+    # Détecte la forme "... for ..."
+    if "for" in raw.split():
+        # Cas : Never {A,B,C} for {X,Y,Z}
+        if len(blocks) >= 2:
+            combo = _split_items_norm(blocks[0])
+            targets = _split_items_norm(blocks[1])
+        else:
+            # Fallback (sans accolades), ex: Never A B C for X Y
+            parts2 = raw.split()
+            idx = parts2.index("for")
+            combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:idx]]
+            combo = [x for x in combo if x]
+            targets = [_norm_entity(p.strip("{} ,")) for p in parts2[idx + 1:]]
+            targets = [x for x in targets if x]
 
-            for ent in entites:
-                st.session_state.interdictions_entites.setdefault(ent, []).append(etiquettes)
-
+        if not combo or not targets:
             out.append(tr(
-                f"🚧 Combinaison interdite {etiquettes} pour entités: {entites}",
-                f"🚧 Forbidden combination {etiquettes} for entities: {entites}"
+                "❌ Usage: Never {A,B,C} for {X,Y}",
+                "❌ Usage: Never {A,B,C} for {X,Y}"
             ))
             return df, "\n".join(out)
 
-        # cas global: Never {A,B}
-        if len(blocks) >= 1:
-            etiquettes = _split_items(blocks[0])
-        else:
-            tmp = raw.split()
-            etiquettes = [p.strip("{} ,") for p in tmp[1:] if p.strip("{} ,")]
+        # Stockage : pour chaque entité cible, on ajoute la COMBINAISON complète
+        for ent in targets:
+            st.session_state.interdictions_entites.setdefault(ent, []).append(combo)
 
-        if not etiquettes:
-            out.append(tr("❌ Usage: Never {A,B}", "❌ Usage: Never {A,B}"))
-            return df, "\n".join(out)
-
-        st.session_state.interdictions_globales.append(etiquettes)
         out.append(tr(
-            f"🚧 Combinaison globalement interdite: {etiquettes}",
-            f"🚧 Globally forbidden combination: {etiquettes}"
+            f"🚧 Combinaison interdite {combo} pour entités: {targets}",
+            f"🚧 Forbidden combination {combo} for entities: {targets}"
         ))
         return df, "\n".join(out)
+
+    # Cas global : Never {A,B,C}
+    if len(blocks) >= 1:
+        combo = _split_items_norm(blocks[0])
+    else:
+        # Fallback sans accolades : Never A B C
+        parts2 = raw.split()
+        combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:]]
+        combo = [x for x in combo if x]
+
+    if not combo:
+        out.append(tr(
+            "❌ Usage: Never {A,B,C}",
+            "❌ Usage: Never {A,B,C}"
+        ))
+        return df, "\n".join(out)
+
+    st.session_state.interdictions_globales.append(combo)
+    out.append(tr(
+        f"🚧 Combinaison globalement interdite: {combo}",
+        f"🚧 Globally forbidden combination: {combo}"
+    ))
+    return df, "\n".join(out)
 
 
     if command == "RemoveGlobalBlock" and args:
