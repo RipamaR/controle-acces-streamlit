@@ -1212,7 +1212,7 @@ if command == "Never":
             nxv = _norm_entity(x)
             if nxv:
                 items.append(nxv)
-        return items
+         return items
 
     # Détecte la forme "... for ..."
     if "for" in raw.split():
