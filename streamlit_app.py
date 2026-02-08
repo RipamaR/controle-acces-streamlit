@@ -1195,79 +1195,79 @@ def apply_prompt(global_data: pd.DataFrame, prompt: str):
 
             # ==================== CHINA-WALL : Never ... ====================
 
-if command == "Never":
-    raw = line.strip()
-
-    # Extrait le contenu entre accolades { ... }
-    # Exemple: "Never {S3, O1, O2} for {S4, O4, O5}"
-    blocks = re.findall(r"\{([^}]*)\}", raw)
-
-    def _split_items_norm(s: str) -> list[str]:
-        # split par virgule + normalisation des IDs (S001 -> S1, o2 -> O2)
-        items = []
-        for x in s.split(","):
-            x = x.strip()
-            if not x:
-                continue
-            nxv = _norm_entity(x)
-            if nxv:
-                items.append(nxv)
-         return items
-
-    # Détecte la forme "... for ..."
-    if "for" in raw.split():
-        # Cas : Never {A,B,C} for {X,Y,Z}
-        if len(blocks) >= 2:
-            combo = _split_items_norm(blocks[0])
-            targets = _split_items_norm(blocks[1])
-        else:
-            # Fallback (sans accolades), ex: Never A B C for X Y
-            parts2 = raw.split()
-            idx = parts2.index("for")
-            combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:idx]]
-            combo = [x for x in combo if x]
-            targets = [_norm_entity(p.strip("{} ,")) for p in parts2[idx + 1:]]
-            targets = [x for x in targets if x]
-
-        if not combo or not targets:
+    if command == "Never":
+        raw = line.strip()
+    
+        # Extrait le contenu entre accolades { ... }
+        # Exemple: "Never {S3, O1, O2} for {S4, O4, O5}"
+        blocks = re.findall(r"\{([^}]*)\}", raw)
+    
+        def _split_items_norm(s: str) -> list[str]:
+            # split par virgule + normalisation des IDs (S001 -> S1, o2 -> O2)
+            items = []
+            for x in s.split(","):
+                x = x.strip()
+                if not x:
+                    continue
+                nxv = _norm_entity(x)
+                if nxv:
+                    items.append(nxv)
+            return items
+    
+        # Détecte la forme "... for ..."
+        if "for" in raw.split():
+            # Cas : Never {A,B,C} for {X,Y,Z}
+            if len(blocks) >= 2:
+                combo = _split_items_norm(blocks[0])
+                targets = _split_items_norm(blocks[1])
+            else:
+                # Fallback (sans accolades), ex: Never A B C for X Y
+                parts2 = raw.split()
+                idx = parts2.index("for")
+                combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:idx]]
+                combo = [x for x in combo if x]
+                targets = [_norm_entity(p.strip("{} ,")) for p in parts2[idx + 1:]]
+                targets = [x for x in targets if x]
+    
+            if not combo or not targets:
+                out.append(tr(
+                    "❌ Usage: Never {A,B,C} for {X,Y}",
+                    "❌ Usage: Never {A,B,C} for {X,Y}"
+                ))
+                return df, "\n".join(out)
+    
+            # Stockage : pour chaque entité cible, on ajoute la COMBINAISON complète
+            for ent in targets:
+                st.session_state.interdictions_entites.setdefault(ent, []).append(combo)
+    
             out.append(tr(
-                "❌ Usage: Never {A,B,C} for {X,Y}",
-                "❌ Usage: Never {A,B,C} for {X,Y}"
+                f"🚧 Combinaison interdite {combo} pour entités: {targets}",
+                f"🚧 Forbidden combination {combo} for entities: {targets}"
             ))
             return df, "\n".join(out)
-
-        # Stockage : pour chaque entité cible, on ajoute la COMBINAISON complète
-        for ent in targets:
-            st.session_state.interdictions_entites.setdefault(ent, []).append(combo)
-
+    
+        # Cas global : Never {A,B,C}
+        if len(blocks) >= 1:
+            combo = _split_items_norm(blocks[0])
+        else:
+            # Fallback sans accolades : Never A B C
+            parts2 = raw.split()
+            combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:]]
+            combo = [x for x in combo if x]
+    
+        if not combo:
+            out.append(tr(
+                "❌ Usage: Never {A,B,C}",
+                "❌ Usage: Never {A,B,C}"
+            ))
+            return df, "\n".join(out)
+    
+        st.session_state.interdictions_globales.append(combo)
         out.append(tr(
-            f"🚧 Combinaison interdite {combo} pour entités: {targets}",
-            f"🚧 Forbidden combination {combo} for entities: {targets}"
+            f"🚧 Combinaison globalement interdite: {combo}",
+            f"🚧 Globally forbidden combination: {combo}"
         ))
         return df, "\n".join(out)
-
-    # Cas global : Never {A,B,C}
-    if len(blocks) >= 1:
-        combo = _split_items_norm(blocks[0])
-    else:
-        # Fallback sans accolades : Never A B C
-        parts2 = raw.split()
-        combo = [_norm_entity(p.strip("{} ,")) for p in parts2[1:]]
-        combo = [x for x in combo if x]
-
-    if not combo:
-        out.append(tr(
-            "❌ Usage: Never {A,B,C}",
-            "❌ Usage: Never {A,B,C}"
-        ))
-        return df, "\n".join(out)
-
-    st.session_state.interdictions_globales.append(combo)
-    out.append(tr(
-        f"🚧 Combinaison globalement interdite: {combo}",
-        f"🚧 Globally forbidden combination: {combo}"
-    ))
-    return df, "\n".join(out)
 
 
     if command == "RemoveGlobalBlock" and args:
