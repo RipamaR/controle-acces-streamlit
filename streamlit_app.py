@@ -131,6 +131,7 @@ def _norm_perm(x: object) -> str | None:
     return s.upper()
 
 def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
+    
     df = df.copy()
     for col in ["Source", "Target"]:
         if col in df.columns:
@@ -142,6 +143,27 @@ def normalize_df(df: pd.DataFrame) -> pd.DataFrame:
     if "Heritage" in df.columns:
         df["Heritage"] = df["Heritage"].apply(lambda v: None if pd.isna(v) else str(v).strip() or None)
     return df
+
+def expand_multi_permissions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Transforme Permission = "R,W" en deux lignes Permission="R" et "W".
+    Supporte aussi "R;W" et "R/W".
+    """
+    df = df.copy()
+    if "Permission" not in df.columns:
+        return df
+
+    # uniformiser les séparateurs
+    df["Permission"] = df["Permission"].astype(str).str.replace(";", ",").str.replace("/", ",")
+    # split -> liste
+    df["Permission"] = df["Permission"].str.split(",")
+    # explode -> une ligne par permission
+    df = df.explode("Permission", ignore_index=True)
+    # nettoyer
+    df["Permission"] = df["Permission"].map(_norm_perm)
+    # garder seulement R/W (les autres valeurs restent mais ne seront pas utilisées par apply_permissions)
+    return df
+
 
 # ================= ALGORITHMES (Tarjan & co) ================
 def tarjan(V, adj):
@@ -1728,13 +1750,42 @@ def main():
                 if {"entity1","entity2"} <= cols_lower:
                     df = load_entities_excel(content)
                 else:
+                    
                     df = pd.read_excel(io.BytesIO(content))
-                    req = {"Source","Permission","Target"}
+                
+                    # ✅ accepter Subject/Object et convertir en Source/Target
+                    rename_map = {}
+                    cols_lower_map = {c.strip().lower(): c for c in df.columns}
+                
+                    if "subject" in cols_lower_map:
+                        rename_map[cols_lower_map["subject"]] = "Source"
+                    if "object" in cols_lower_map:
+                        rename_map[cols_lower_map["object"]] = "Target"
+                    if "permission" in cols_lower_map:
+                        rename_map[cols_lower_map["permission"]] = "Permission"
+                
+                    df = df.rename(columns=rename_map)
+                
+                    # vérification colonnes obligatoires
+                    req = {"Source", "Permission", "Target"}
                     missing = req - set(df.columns)
-                    if missing: raise ValueError(tr(f"Colonnes manquantes: {missing}", f"Missing columns: {missing}"))
-                    if "Role" not in df.columns: df["Role"] = None
-                    if "Heritage" not in df.columns: df["Heritage"] = None
+                    if missing:
+                        raise ValueError(tr(f"Colonnes manquantes: {missing}", f"Missing columns: {missing}"))
+                
+                    # colonnes optionnelles
+                    if "Role" not in df.columns:
+                        df["Role"] = None
+                    if "Heritage" not in df.columns:
+                        df["Heritage"] = None
+                
+                    # normalisation
                     df = normalize_df(df)
+
+    # ✅ éclater R,W en deux lignes
+    df = expand_multi_permissions(df)
+
+    df = normalize_df(df)
+
                 st.session_state.global_data = df
                 st.success(tr("✅ Fichier chargé.", "✅ File loaded."))
                 with st.expander(tr("Voir les données chargées", "View loaded data")):
