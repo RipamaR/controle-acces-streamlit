@@ -1751,40 +1751,40 @@ def main():
                     df = load_entities_excel(content)
                 else:
                     
-                df = pd.read_excel(io.BytesIO(content))
-            
-                # ✅ accepter Subject/Object et convertir en Source/Target
-                rename_map = {}
-                cols_lower_map = {c.strip().lower(): c for c in df.columns}
-            
-                if "subject" in cols_lower_map:
-                    rename_map[cols_lower_map["subject"]] = "Source"
-                if "object" in cols_lower_map:
-                    rename_map[cols_lower_map["object"]] = "Target"
-                if "permission" in cols_lower_map:
-                    rename_map[cols_lower_map["permission"]] = "Permission"
-            
-                df = df.rename(columns=rename_map)
-            
-                # vérification colonnes obligatoires
-                req = {"Source", "Permission", "Target"}
-                missing = req - set(df.columns)
-                if missing:
-                    raise ValueError(tr(f"Colonnes manquantes: {missing}", f"Missing columns: {missing}"))
-            
-                # colonnes optionnelles
-                if "Role" not in df.columns:
-                    df["Role"] = None
-                if "Heritage" not in df.columns:
-                    df["Heritage"] = None
-            
-                # normalisation
-                df = normalize_df(df)
-            
-                # ✅ éclater R,W en deux lignes
-                df = expand_multi_permissions(df)
-            
-                df = normalize_df(df)
+                    df = pd.read_excel(io.BytesIO(content))
+                
+                    # ✅ accepter Subject/Object et convertir en Source/Target
+                    rename_map = {}
+                    cols_lower_map = {c.strip().lower(): c for c in df.columns}
+                
+                    if "subject" in cols_lower_map:
+                        rename_map[cols_lower_map["subject"]] = "Source"
+                    if "object" in cols_lower_map:
+                        rename_map[cols_lower_map["object"]] = "Target"
+                    if "permission" in cols_lower_map:
+                        rename_map[cols_lower_map["permission"]] = "Permission"
+                
+                    df = df.rename(columns=rename_map)
+                
+                    # vérification colonnes obligatoires
+                    req = {"Source", "Permission", "Target"}
+                    missing = req - set(df.columns)
+                    if missing:
+                        raise ValueError(tr(f"Colonnes manquantes: {missing}", f"Missing columns: {missing}"))
+                
+                    # colonnes optionnelles
+                    if "Role" not in df.columns:
+                        df["Role"] = None
+                    if "Heritage" not in df.columns:
+                        df["Heritage"] = None
+                
+                    # normalisation
+                    df = normalize_df(df)
+                
+                    # ✅ éclater R,W en deux lignes
+                    df = expand_multi_permissions(df)
+                
+                    df = normalize_df(df)
 
                 st.session_state.global_data = df
                 st.success(tr("✅ Fichier chargé.", "✅ File loaded."))
